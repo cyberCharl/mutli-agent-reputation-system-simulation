@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { config } from 'dotenv';
 import { MSPNGame } from './game';
 import { Agent, LLMModel } from './agent';
 import { ReputationSystem } from './reputation';
@@ -11,6 +12,9 @@ import {
   TrueState,
 } from './types';
 
+// Load environment variables from .env file
+config();
+
 export async function runEpisode(
   episodeId: number,
   apiKey?: string,
@@ -21,8 +25,8 @@ export async function runEpisode(
   const reputationSystem = useReputation ? new ReputationSystem() : null;
 
   // Create agents
-  const modelA = new LLMModel(apiKey);
-  const modelB = new LLMModel(apiKey);
+  const modelA = new LLMModel(apiKey, 'x-ai/grok-4-fast:free');
+  const modelB = new LLMModel(apiKey, 'deepseek/deepseek-chat-v3.1:free');
   const agentA = new Agent('A', modelA);
   const agentB = new Agent('B', modelB);
 
