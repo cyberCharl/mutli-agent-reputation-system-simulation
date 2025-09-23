@@ -62,7 +62,7 @@ npm install
 
 ```bash
 cp env.example .env
-# Edit .env and add your OpenAI API key
+# Edit .env and add your OpenRouter API key
 ```
 
 ### Configuration
@@ -90,7 +90,7 @@ npm run dev [numEpisodes] [seed]
 # Example: npm run dev 200 test-seed-123
 ```
 
-3. **With OpenAI API** (set OPENAI_API_KEY in .env):
+3. **With OpenRouter API** (set OPENROUTER_API_KEY in .env):
 
 ```bash
 npm run dev 100

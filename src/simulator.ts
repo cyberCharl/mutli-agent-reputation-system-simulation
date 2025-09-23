@@ -221,7 +221,7 @@ function logMetrics(metrics: ABTestMetrics): void {
 
 // Main execution
 async function main(): Promise<void> {
-  const apiKey = process.env.OPENAI_API_KEY;
+  const apiKey = process.env.OPENROUTER_API_KEY;
   const numEpisodes = parseInt(process.argv[2]) || 100;
   const seed = process.argv[3] || 'default';
 

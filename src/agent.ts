@@ -21,12 +21,20 @@ export class LLMModel {
   private modelId: string;
   private isMockMode: boolean;
 
-  constructor(apiKey?: string, modelId: string = 'gpt-4o-mini') {
+  constructor(apiKey?: string, modelId: string = 'openai/gpt-4o-mini') {
     this.modelId = modelId;
     this.isMockMode = !apiKey || apiKey === 'mock';
 
     if (!this.isMockMode) {
-      this.client = new OpenAI({ apiKey });
+      // Use OpenRouter API endpoint
+      this.client = new OpenAI({
+        apiKey,
+        baseURL: 'https://openrouter.ai/api/v1',
+        defaultHeaders: {
+          'HTTP-Referer': 'https://github.com/your-username/mspn-simulation', // Optional: for tracking
+          'X-Title': 'MSPN Simulation', // Optional: for tracking
+        },
+      });
     } else {
       this.client = null;
     }
