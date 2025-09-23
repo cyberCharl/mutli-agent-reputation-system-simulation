@@ -109,7 +109,14 @@ npm run dev 100
 The simulator generates:
 
 - Console logs with progress and results
-- `results.json`: Detailed results including metrics and episode data
+- Layered results under `results/<run-id>/`:
+  - `summary.json`: Run parameters and aggregate metrics
+  - `baseline/episodes.json`: All baseline episode objects
+  - `baseline/episode_<n>.json`: One file per baseline episode
+  - `reputation/episodes.json`: All reputation episode objects
+  - `reputation/episode_<n>.json`: One file per reputation episode
+
+`<run-id>` format: `run_YYYY-MM-DD_HH-MM-SS_eps-<num>_seed-<seed>`
 
 ### Metrics Explained
 

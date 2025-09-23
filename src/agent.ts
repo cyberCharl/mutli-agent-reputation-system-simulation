@@ -31,8 +31,9 @@ export class LLMModel {
         apiKey,
         baseURL: 'https://openrouter.ai/api/v1',
         defaultHeaders: {
-          'HTTP-Referer': 'https://github.com/your-username/mspn-simulation', // Optional: for tracking
-          'X-Title': 'MSPN Simulation', // Optional: for tracking
+          'HTTP-Referer':
+            'https://github.com/cyberCharl/mutli-agent-reputation-system-simulation',
+          'X-Title': 'MSPN Simulation',
         },
       });
     } else {

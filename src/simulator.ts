@@ -150,17 +150,61 @@ export async function runABTest(
   console.log('\nWith Reputation:');
   logMetrics(reputationMetrics);
 
-  // Save results
-  const results = {
+  // Save results in layered directory structure
+  const resultsRoot = path.join(process.cwd(), 'results');
+  if (!fs.existsSync(resultsRoot)) {
+    fs.mkdirSync(resultsRoot, { recursive: true });
+  }
+
+  const timestamp = new Date()
+    .toISOString()
+    .replace(/[:]/g, '-')
+    .replace('T', '_')
+    .replace(/\..+$/, '');
+  const runId = `run_${timestamp}_eps-${numEpisodes}_seed-${seed || 'default'}`;
+  const runDir = path.join(resultsRoot, runId);
+  fs.mkdirSync(runDir, { recursive: true });
+
+  // Write a concise summary at the run root
+  const summary = {
+    parameters: {
+      numEpisodes,
+      seed: seed || 'default',
+      apiKeyProvided: Boolean(apiKey),
+    },
     baseline: baselineMetrics,
     withReputation: reputationMetrics,
-    baselineEpisodes: baselineResults,
-    reputationEpisodes: reputationResults,
   };
+  fs.writeFileSync(
+    path.join(runDir, 'summary.json'),
+    JSON.stringify(summary, null, 2)
+  );
 
-  const resultsPath = path.join(process.cwd(), 'results.json');
-  fs.writeFileSync(resultsPath, JSON.stringify(results, null, 2));
-  console.log(`\nResults saved to ${resultsPath}`);
+  // Baseline variant folder
+  const baselineDir = path.join(runDir, 'baseline');
+  fs.mkdirSync(baselineDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(baselineDir, 'episodes.json'),
+    JSON.stringify(baselineResults, null, 2)
+  );
+  baselineResults.forEach((ep) => {
+    const file = path.join(baselineDir, `episode_${ep.episodeId}.json`);
+    fs.writeFileSync(file, JSON.stringify(ep, null, 2));
+  });
+
+  // Reputation variant folder
+  const reputationDir = path.join(runDir, 'reputation');
+  fs.mkdirSync(reputationDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(reputationDir, 'episodes.json'),
+    JSON.stringify(reputationResults, null, 2)
+  );
+  reputationResults.forEach((ep) => {
+    const file = path.join(reputationDir, `episode_${ep.episodeId}.json`);
+    fs.writeFileSync(file, JSON.stringify(ep, null, 2));
+  });
+
+  console.log(`\nResults saved under ${runDir}`);
 
   return { baseline: baselineMetrics, withReputation: reputationMetrics };
 }
