@@ -169,24 +169,6 @@ The tests cover:
 - Payoff calculations
 - Reproducibility with seeds
 
-### Code Style
-
-The project uses:
-
-- TypeScript strict mode
-- Prettier formatting (80 char width)
-- Comprehensive type safety
-- Error handling with retries
-
-## Research Applications
-
-This simulator is designed for:
-
-- Multi-agent security research
-- Reputation system effectiveness studies
-- LLM behavior analysis in strategic games
-- A/B testing of intervention mechanisms
-
 ## Contributing
 
 1. Follow the existing code style
