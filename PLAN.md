@@ -391,12 +391,12 @@ export function bootstrapCI(data: number[], confidence: number = 0.95): {
 ```
 
 #### Definition of Done
-- [ ] `src/stats.ts` exists with `pairedTTest()` and `bootstrapCI()` functions
-- [ ] t-test implementation matches standard statistical formula
-- [ ] Bootstrap CI uses 10,000 resamples by default
-- [ ] A/B test results include p-value and confidence intervals
-- [ ] Results clearly indicate whether difference is statistically significant
-- [ ] Unit tests verify correctness against known statistical results
+- [x] `src/stats.ts` exists with `pairedTTest()` and `bootstrapCI()` functions
+- [x] t-test implementation matches standard statistical formula
+- [x] Bootstrap CI uses 10,000 resamples by default
+- [x] A/B test results include p-value and confidence intervals
+- [x] Results clearly indicate whether difference is statistically significant
+- [x] Unit tests verify correctness against known statistical results
 
 #### Validation Mechanism
 ```bash

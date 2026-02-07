@@ -10,7 +10,9 @@ import {
   ProtocolLevel,
   ReviewAction,
   TrueState,
+  StatisticalSignificance,
 } from './types';
+import { pairedTTest, bootstrapCI } from './stats';
 
 // Load environment variables from .env file
 config();
@@ -207,6 +209,68 @@ export async function runABTest(
   console.log('\nWith Reputation:');
   logMetrics(reputationMetrics);
 
+  // Statistical significance analysis
+  let significance: StatisticalSignificance | null = null;
+  const minPairs = Math.min(baselineResults.length, reputationResults.length);
+  if (minPairs >= 2) {
+    const basePayoffsA = baselineResults
+      .slice(0, minPairs)
+      .map((ep) => ep.payoffs.a);
+    const repPayoffsA = reputationResults
+      .slice(0, minPairs)
+      .map((ep) => ep.payoffs.a);
+    const basePayoffsB = baselineResults
+      .slice(0, minPairs)
+      .map((ep) => ep.payoffs.b);
+    const repPayoffsB = reputationResults
+      .slice(0, minPairs)
+      .map((ep) => ep.payoffs.b);
+
+    const tTestA = pairedTTest(basePayoffsA, repPayoffsA);
+    const tTestB = pairedTTest(basePayoffsB, repPayoffsB);
+
+    const allBasePayoffs = baselineResults.map(
+      (ep) => ep.payoffs.a + ep.payoffs.b
+    );
+    const allRepPayoffs = reputationResults.map(
+      (ep) => ep.payoffs.a + ep.payoffs.b
+    );
+
+    const baseCI = bootstrapCI(allBasePayoffs, 0.95, 10000, seed);
+    const repCI = bootstrapCI(allRepPayoffs, 0.95, 10000, seed ? `${seed}-rep` : undefined);
+
+    significance = {
+      payoffA: {
+        tStatistic: tTestA.tStatistic,
+        pValue: tTestA.pValue,
+        significant: tTestA.significant,
+        meanDifference: tTestA.meanDifference,
+      },
+      payoffB: {
+        tStatistic: tTestB.tStatistic,
+        pValue: tTestB.pValue,
+        significant: tTestB.significant,
+        meanDifference: tTestB.meanDifference,
+      },
+      baselineCI: { mean: baseCI.mean, lower: baseCI.lower, upper: baseCI.upper },
+      treatmentCI: { mean: repCI.mean, lower: repCI.lower, upper: repCI.upper },
+    };
+
+    console.log('\n=== STATISTICAL SIGNIFICANCE ===');
+    console.log(
+      `  Payoff A: t=${tTestA.tStatistic}, p=${tTestA.pValue} ${tTestA.significant ? '(SIGNIFICANT)' : '(not significant)'}`
+    );
+    console.log(
+      `  Payoff B: t=${tTestB.tStatistic}, p=${tTestB.pValue} ${tTestB.significant ? '(SIGNIFICANT)' : '(not significant)'}`
+    );
+    console.log(
+      `  Baseline total payoff CI: [${baseCI.lower}, ${baseCI.upper}] (mean=${baseCI.mean})`
+    );
+    console.log(
+      `  Treatment total payoff CI: [${repCI.lower}, ${repCI.upper}] (mean=${repCI.mean})`
+    );
+  }
+
   // Save results in layered directory structure
   const resultsRoot = path.join(process.cwd(), 'results');
   if (!fs.existsSync(resultsRoot)) {
@@ -231,6 +295,7 @@ export async function runABTest(
     },
     baseline: baselineMetrics,
     withReputation: reputationMetrics,
+    significance,
   };
   fs.writeFileSync(
     path.join(runDir, 'summary.json'),

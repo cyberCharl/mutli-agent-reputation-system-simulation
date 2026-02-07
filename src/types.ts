@@ -88,3 +88,20 @@ export interface GameConfig {
   payoffNoise: number;
   initialBeliefAlignment: number;
 }
+
+export interface StatisticalSignificance {
+  payoffA: {
+    tStatistic: number;
+    pValue: number;
+    significant: boolean;
+    meanDifference: number;
+  };
+  payoffB: {
+    tStatistic: number;
+    pValue: number;
+    significant: boolean;
+    meanDifference: number;
+  };
+  baselineCI: { mean: number; lower: number; upper: number };
+  treatmentCI: { mean: number; lower: number; upper: number };
+}
