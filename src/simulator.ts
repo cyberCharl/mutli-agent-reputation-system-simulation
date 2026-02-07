@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { config } from 'dotenv';
+import pLimit from 'p-limit';
 import { MSPNGame } from './game';
 import { Agent, LLMModel } from './agent';
 import { ReputationSystem } from './reputation';
@@ -14,6 +15,35 @@ import {
 } from './types';
 import { pairedTTest, bootstrapCI } from './stats';
 import { KarmaStorage } from './karma/storage';
+
+const DEFAULT_CONCURRENCY = 4;
+
+/**
+ * Simple async mutex for serializing reputation updates.
+ */
+class AsyncMutex {
+  private queue: (() => void)[] = [];
+  private locked = false;
+
+  async acquire(): Promise<void> {
+    if (!this.locked) {
+      this.locked = true;
+      return;
+    }
+    return new Promise<void>((resolve) => {
+      this.queue.push(resolve);
+    });
+  }
+
+  release(): void {
+    const next = this.queue.shift();
+    if (next) {
+      next();
+    } else {
+      this.locked = false;
+    }
+  }
+}
 
 // Load environment variables from .env file
 config();
@@ -133,12 +163,6 @@ export async function runEpisode(
       converged,
     };
 
-    // Update reputation if enabled
-    if (useReputation && reputationSystem) {
-      const deltas = reputationSystem.inspectAndUpdate(result);
-      result.reputationDeltas = deltas;
-    }
-
     return result;
   } catch (error) {
     console.error(`Episode ${episodeId} failed:`, error);
@@ -149,31 +173,47 @@ export async function runEpisode(
 export async function runABTest(
   numEpisodes: number = 100,
   apiKey?: string,
-  seed?: string
+  seed?: string,
+  concurrency: number = DEFAULT_CONCURRENCY
 ): Promise<{ baseline: ABTestMetrics; withReputation: ABTestMetrics }> {
-  console.log(`Starting A/B test with ${numEpisodes} episodes each...`);
+  const effectiveConcurrency = Math.max(1, concurrency);
+  console.log(
+    `Starting A/B test with ${numEpisodes} episodes each (concurrency=${effectiveConcurrency})...`
+  );
 
-  // Run baseline (no reputation)
+  // Run baseline (no reputation) — fully parallel
   console.log('Running baseline (no reputation)...');
-  const baselineResults: EpisodeResult[] = [];
+  const limit = pLimit(effectiveConcurrency);
+  let baselineCompleted = 0;
 
-  for (let i = 0; i < numEpisodes; i++) {
-    try {
-      const result = await runEpisode(i, apiKey, false, seed);
-      baselineResults.push(result);
-
-      if ((i + 1) % 10 === 0) {
-        console.log(`Baseline: Completed ${i + 1}/${numEpisodes} episodes`);
+  const baselinePromises = Array.from({ length: numEpisodes }, (_, i) =>
+    limit(async () => {
+      try {
+        const result = await runEpisode(i, apiKey, false, seed);
+        baselineCompleted++;
+        if (baselineCompleted % 10 === 0) {
+          console.log(
+            `Baseline: Completed ${baselineCompleted}/${numEpisodes} episodes`
+          );
+        }
+        return result;
+      } catch (error) {
+        console.error(`Baseline episode ${i} failed:`, error);
+        return null;
       }
-    } catch (error) {
-      console.error(`Baseline episode ${i} failed:`, error);
-    }
-  }
+    })
+  );
+
+  const baselineSettled = await Promise.all(baselinePromises);
+  const baselineResults = baselineSettled.filter(
+    (r): r is EpisodeResult => r !== null
+  );
 
   // Run with reputation (shared system persists across episodes)
+  // Episodes run in parallel; reputation reads/updates are serialized via mutex
   console.log('Running with reputation system...');
-  const reputationResults: EpisodeResult[] = [];
   const sharedReputationSystem = new ReputationSystem();
+  const reputationMutex = new AsyncMutex();
 
   // Load persisted karma if available
   const karmaStorage = new KarmaStorage();
@@ -189,28 +229,51 @@ export async function runABTest(
     }
   }
 
-  for (let i = 0; i < numEpisodes; i++) {
-    try {
-      const result = await runEpisode(
-        i,
-        apiKey,
-        true,
-        seed,
-        sharedReputationSystem
-      );
-      reputationResults.push(result);
+  const repLimit = pLimit(effectiveConcurrency);
+  let repCompleted = 0;
 
-      if ((i + 1) % 10 === 0) {
-        console.log(`Reputation: Completed ${i + 1}/${numEpisodes} episodes`);
-        console.log(
-          `  Agent A karma: ${sharedReputationSystem.getModelReputation('model-A').karma}, ` +
-            `Agent B karma: ${sharedReputationSystem.getModelReputation('model-B').karma}`
+  const reputationPromises = Array.from({ length: numEpisodes }, (_, i) =>
+    repLimit(async () => {
+      try {
+        const result = await runEpisode(
+          i,
+          apiKey,
+          true,
+          seed,
+          sharedReputationSystem
         );
+
+        // Serialize reputation update
+        await reputationMutex.acquire();
+        try {
+          const deltas = sharedReputationSystem.inspectAndUpdate(result);
+          result.reputationDeltas = deltas;
+        } finally {
+          reputationMutex.release();
+        }
+
+        repCompleted++;
+        if (repCompleted % 10 === 0) {
+          console.log(
+            `Reputation: Completed ${repCompleted}/${numEpisodes} episodes`
+          );
+          console.log(
+            `  Agent A karma: ${sharedReputationSystem.getModelReputation('model-A').karma}, ` +
+              `Agent B karma: ${sharedReputationSystem.getModelReputation('model-B').karma}`
+          );
+        }
+        return result;
+      } catch (error) {
+        console.error(`Reputation episode ${i} failed:`, error);
+        return null;
       }
-    } catch (error) {
-      console.error(`Reputation episode ${i} failed:`, error);
-    }
-  }
+    })
+  );
+
+  const reputationSettled = await Promise.all(reputationPromises);
+  const reputationResults = reputationSettled.filter(
+    (r): r is EpisodeResult => r !== null
+  );
 
   // Persist karma after all reputation episodes
   const allReps = sharedReputationSystem.getAllReputations();
@@ -416,14 +479,16 @@ async function main(): Promise<void> {
   const apiKey = process.env.OPENROUTER_API_KEY;
   const numEpisodes = parseInt(process.argv[2]) || 100;
   const seed = process.argv[3] || 'default';
+  const concurrency = parseInt(process.argv[4]) || DEFAULT_CONCURRENCY;
 
   console.log('MSPN Simulation Starting...');
   console.log(`API Key: ${apiKey ? 'Provided' : 'Using mock mode'}`);
   console.log(`Episodes: ${numEpisodes}`);
   console.log(`Seed: ${seed}`);
+  console.log(`Concurrency: ${concurrency}`);
 
   try {
-    await runABTest(numEpisodes, apiKey, seed);
+    await runABTest(numEpisodes, apiKey, seed, concurrency);
     console.log('\nSimulation completed successfully!');
   } catch (error) {
     console.error('Simulation failed:', error);

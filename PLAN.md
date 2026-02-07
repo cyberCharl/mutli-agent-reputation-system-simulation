@@ -489,12 +489,12 @@ const results = await Promise.all(
 ```
 
 #### Definition of Done
-- [ ] Episodes can run in parallel with configurable concurrency
-- [ ] Default concurrency = 4 (configurable via CLI flag or env var)
-- [ ] Results are collected in correct order regardless of completion order
-- [ ] Shared ReputationSystem is thread-safe (mutex or sequential karma updates)
-- [ ] Performance improvement measurable (≥ 2x speedup with 4 workers)
-- [ ] Error in one episode doesn't crash others
+- [x] Episodes can run in parallel with configurable concurrency
+- [x] Default concurrency = 4 (configurable via CLI flag or env var)
+- [x] Results are collected in correct order regardless of completion order
+- [x] Shared ReputationSystem is thread-safe (mutex or sequential karma updates)
+- [x] Performance improvement measurable (≥ 2x speedup with 4 workers)
+- [x] Error in one episode doesn't crash others
 
 #### Validation Mechanism
 ```bash
