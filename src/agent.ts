@@ -44,13 +44,21 @@ export class LLMModel {
   public async decidePropose(
     belief: NestedBelief,
     history: string[],
-    reputationWarning?: string
+    reputationWarning?: string,
+    karma?: number,
+    opponentKarma?: number
   ): Promise<ProtocolLevel> {
     if (this.isMockMode) {
       return this.mockPropose(belief);
     }
 
-    const prompt = formatProposalPrompt(belief, history, reputationWarning);
+    const prompt = formatProposalPrompt(
+      belief,
+      history,
+      reputationWarning,
+      karma,
+      opponentKarma
+    );
 
     try {
       const response = await this.client!.chat.completions.create({
@@ -89,13 +97,21 @@ export class LLMModel {
   public async decideReview(
     proposal: ProtocolLevel,
     belief: NestedBelief,
-    history: string[]
+    history: string[],
+    karma?: number,
+    opponentKarma?: number
   ): Promise<ReviewAction> {
     if (this.isMockMode) {
       return this.mockReview(proposal, belief);
     }
 
-    const prompt = formatReviewPrompt(proposal, belief, history);
+    const prompt = formatReviewPrompt(
+      proposal,
+      belief,
+      history,
+      karma,
+      opponentKarma
+    );
 
     try {
       const response = await this.client!.chat.completions.create({
@@ -182,16 +198,29 @@ export class Agent {
     actionType: 'propose' | 'review',
     belief: NestedBelief,
     history: string[],
-    proposal?: ProtocolLevel
+    proposal?: ProtocolLevel,
+    opponentKarma?: number
   ): Promise<ProtocolLevel | ReviewAction> {
     if (actionType === 'propose') {
       const reputationWarning = this.getReputationWarning();
-      return await this.model.decidePropose(belief, history, reputationWarning);
+      return await this.model.decidePropose(
+        belief,
+        history,
+        reputationWarning,
+        this.reputation.karma,
+        opponentKarma
+      );
     } else {
       if (!proposal) {
         throw new Error('Proposal required for review action');
       }
-      return await this.model.decideReview(proposal, belief, history);
+      return await this.model.decideReview(
+        proposal,
+        belief,
+        history,
+        this.reputation.karma,
+        opponentKarma
+      );
     }
   }
 

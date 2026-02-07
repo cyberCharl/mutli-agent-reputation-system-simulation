@@ -19,10 +19,10 @@ export async function runEpisode(
   episodeId: number,
   apiKey?: string,
   useReputation: boolean = false,
-  seed?: string
+  seed?: string,
+  reputationSystem: ReputationSystem | null = null
 ): Promise<EpisodeResult> {
   const game = new MSPNGame(seed ? `${seed}-${episodeId}` : undefined);
-  const reputationSystem = useReputation ? new ReputationSystem() : null;
 
   // Create agents
   const modelA = new LLMModel(apiKey, 'x-ai/grok-4-fast:free');
@@ -41,10 +41,16 @@ export async function runEpisode(
   try {
     // Phase 1: Proposal
     const state = game.getState();
+    const opponentKarmaForA =
+      useReputation && reputationSystem
+        ? reputationSystem.getModelReputation('model-B').karma
+        : undefined;
     const proposal = await agentA.act(
       'propose',
       state.agentBeliefs.a,
-      state.history
+      state.history,
+      undefined,
+      opponentKarmaForA
     );
 
     // Apply reputation consequences
@@ -53,11 +59,16 @@ export async function runEpisode(
 
     // Phase 2: Review
     const reviewState = game.getState();
+    const opponentKarmaForB =
+      useReputation && reputationSystem
+        ? reputationSystem.getModelReputation('model-A').karma
+        : undefined;
     const reviewAction = await agentB.act(
       'review',
       reviewState.agentBeliefs.b,
       reviewState.history,
-      reviewState.proposal
+      reviewState.proposal,
+      opponentKarmaForB
     );
 
     // Apply reputation consequences
@@ -125,17 +136,28 @@ export async function runABTest(
     }
   }
 
-  // Run with reputation
+  // Run with reputation (shared system persists across episodes)
   console.log('Running with reputation system...');
   const reputationResults: EpisodeResult[] = [];
+  const sharedReputationSystem = new ReputationSystem();
 
   for (let i = 0; i < numEpisodes; i++) {
     try {
-      const result = await runEpisode(i, apiKey, true, seed);
+      const result = await runEpisode(
+        i,
+        apiKey,
+        true,
+        seed,
+        sharedReputationSystem
+      );
       reputationResults.push(result);
 
       if ((i + 1) % 10 === 0) {
         console.log(`Reputation: Completed ${i + 1}/${numEpisodes} episodes`);
+        console.log(
+          `  Agent A karma: ${sharedReputationSystem.getModelReputation('model-A').karma}, ` +
+            `Agent B karma: ${sharedReputationSystem.getModelReputation('model-B').karma}`
+        );
       }
     } catch (error) {
       console.error(`Reputation episode ${i} failed:`, error);

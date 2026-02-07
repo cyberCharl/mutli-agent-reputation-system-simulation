@@ -61,27 +61,59 @@ Remember: You must respond with valid JSON only.`;
 export function formatProposalPrompt(
   belief: NestedBelief,
   history: string[],
-  reputationWarning?: string
+  reputationWarning?: string,
+  karma?: number,
+  opponentKarma?: number
 ): string {
   const historyStr = history.length > 0 ? history.join('; ') : 'None';
   const warning = reputationWarning ? `\n\nWARNING: ${reputationWarning}` : '';
 
+  let karmaContext = '';
+  if (karma !== undefined) {
+    karmaContext = `\n\nYour current karma: ${karma}/100.`;
+    if (karma < 30) {
+      karmaContext +=
+        ' WARNING: Low karma may result in blocked actions.';
+    }
+    if (opponentKarma !== undefined) {
+      karmaContext += `\nOpponent karma: ${opponentKarma}/100.`;
+    }
+  }
+
   return (
     PROPOSAL_PROMPT.replace('{{belief}}', JSON.stringify(belief.own))
       .replace('{{opponentBelief}}', JSON.stringify(belief.aboutOpponent))
-      .replace('{{history}}', historyStr) + warning
+      .replace('{{history}}', historyStr) +
+    karmaContext +
+    warning
   );
 }
 
 export function formatReviewPrompt(
   proposal: ProtocolLevel,
   belief: NestedBelief,
-  history: string[]
+  history: string[],
+  karma?: number,
+  opponentKarma?: number
 ): string {
   const historyStr = history.length > 0 ? history.join('; ') : 'None';
 
-  return REVIEW_PROMPT.replace('{{proposal}}', proposal)
-    .replace('{{belief}}', JSON.stringify(belief.own))
-    .replace('{{opponentBelief}}', JSON.stringify(belief.aboutOpponent))
-    .replace('{{history}}', historyStr);
+  let karmaContext = '';
+  if (karma !== undefined) {
+    karmaContext = `\n\nYour current karma: ${karma}/100.`;
+    if (karma < 30) {
+      karmaContext +=
+        ' WARNING: Low karma may result in blocked actions.';
+    }
+    if (opponentKarma !== undefined) {
+      karmaContext += `\nOpponent karma: ${opponentKarma}/100.`;
+    }
+  }
+
+  return (
+    REVIEW_PROMPT.replace('{{proposal}}', proposal)
+      .replace('{{belief}}', JSON.stringify(belief.own))
+      .replace('{{opponentBelief}}', JSON.stringify(belief.aboutOpponent))
+      .replace('{{history}}', historyStr) + karmaContext
+  );
 }
