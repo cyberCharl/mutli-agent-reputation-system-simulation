@@ -441,12 +441,12 @@ export class KarmaStorage {
 Option B: SQLite for larger scale
 
 #### Definition of Done
-- [ ] `KarmaStorage` class implemented with `save()` and `load()` methods
-- [ ] Storage location configurable (default: `./data/karma.json`)
-- [ ] ReputationSystem can initialize from stored karma
-- [ ] Karma persists across simulation runs (not just episodes)
-- [ ] Handles missing file gracefully (starts fresh)
-- [ ] Atomic writes to prevent corruption
+- [x] `KarmaStorage` class implemented with `save()` and `load()` methods
+- [x] Storage location configurable (default: `./data/karma.json`)
+- [x] ReputationSystem can initialize from stored karma
+- [x] Karma persists across simulation runs (not just episodes)
+- [x] Handles missing file gracefully (starts fresh)
+- [x] Atomic writes to prevent corruption
 
 #### Validation Mechanism
 ```bash

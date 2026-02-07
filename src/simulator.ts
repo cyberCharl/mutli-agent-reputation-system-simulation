@@ -13,6 +13,7 @@ import {
   StatisticalSignificance,
 } from './types';
 import { pairedTTest, bootstrapCI } from './stats';
+import { KarmaStorage } from './karma/storage';
 
 // Load environment variables from .env file
 config();
@@ -174,6 +175,20 @@ export async function runABTest(
   const reputationResults: EpisodeResult[] = [];
   const sharedReputationSystem = new ReputationSystem();
 
+  // Load persisted karma if available
+  const karmaStorage = new KarmaStorage();
+  if (karmaStorage.exists()) {
+    const storedKarma = karmaStorage.load();
+    if (storedKarma.size > 0) {
+      const karmaRecord: Record<string, number> = {};
+      for (const [id, karma] of storedKarma) {
+        karmaRecord[id] = karma;
+      }
+      sharedReputationSystem.importReputations(karmaRecord);
+      console.log(`  Loaded persisted karma for ${storedKarma.size} agents`);
+    }
+  }
+
   for (let i = 0; i < numEpisodes; i++) {
     try {
       const result = await runEpisode(
@@ -195,6 +210,17 @@ export async function runABTest(
     } catch (error) {
       console.error(`Reputation episode ${i} failed:`, error);
     }
+  }
+
+  // Persist karma after all reputation episodes
+  const allReps = sharedReputationSystem.getAllReputations();
+  if (allReps.size > 0) {
+    const karmaMap = new Map<string, number>();
+    for (const [id, rep] of allReps) {
+      karmaMap.set(id, rep.karma);
+    }
+    karmaStorage.save(karmaMap);
+    console.log(`  Persisted karma for ${allReps.size} agents to ${karmaStorage.getPath()}`);
   }
 
   // Calculate metrics
