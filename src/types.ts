@@ -62,6 +62,8 @@ export interface EpisodeResult {
   agentBeliefs: { a: NestedBelief; b: NestedBelief };
   reviewAction?: ReviewAction;
   reputationDeltas?: { a: number; b: number };
+  roundCount: number;
+  converged: boolean;
 }
 
 export interface ABTestMetrics {

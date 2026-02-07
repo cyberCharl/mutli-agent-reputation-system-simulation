@@ -91,6 +91,8 @@ export class MSPNGame {
 
     // Update beliefs based on proposal
     this.updateBeliefs('A', proposal, 'proposal');
+    // Observer (B) updates beliefs from watching A's action
+    this.updateBeliefsFromObservation('B', proposal, 'proposal');
   }
 
   public setReview(reviewAction: ReviewAction): void {
@@ -107,6 +109,8 @@ export class MSPNGame {
 
     // Update beliefs based on review
     this.updateBeliefs('B', reviewAction, 'review');
+    // Observer (A) updates beliefs from watching B's action
+    this.updateBeliefsFromObservation('A', reviewAction, 'review');
   }
 
   public resolveExecution(): GameState {
@@ -240,6 +244,63 @@ export class MSPNGame {
     };
   }
 
+  /**
+   * Update an observing agent's beliefs based on the opponent's revealed action.
+   * When the observer sees the opponent propose Low, the observer infers the
+   * opponent believes the state is safe — updating the observer's aboutOpponent belief.
+   */
+  public updateBeliefsFromObservation(
+    observerId: 'A' | 'B',
+    observedAction: ProtocolLevel | ReviewAction,
+    type: 'proposal' | 'review'
+  ): void {
+    const strength =
+      type === 'proposal'
+        ? this.config.beliefUpdateStrength.proposal
+        : this.config.beliefUpdateStrength.review;
+
+    const observerKey = observerId.toLowerCase() as 'a' | 'b';
+    const observerBelief = this.state.agentBeliefs[observerKey];
+    const updatedBelief = {
+      own: { ...observerBelief.own },
+      aboutOpponent: { ...observerBelief.aboutOpponent },
+    };
+
+    if (type === 'proposal') {
+      const proposal = observedAction as ProtocolLevel;
+      if (proposal === ProtocolLevel.Low) {
+        // Opponent proposed low → opponent likely believes state is safe
+        updatedBelief.aboutOpponent[TrueState.SafeLow] += strength;
+        updatedBelief.aboutOpponent[TrueState.DangerousLow] -= strength;
+      } else if (proposal === ProtocolLevel.High) {
+        // Opponent proposed high → opponent likely believes state is dangerous
+        updatedBelief.aboutOpponent[TrueState.SafeLow] -= strength / 2;
+        updatedBelief.aboutOpponent[TrueState.DangerousLow] += strength / 2;
+      }
+    } else {
+      const review = observedAction as ReviewAction;
+      if (review === ReviewAction.Accept) {
+        // Opponent accepted → opponent likely believes state is safe
+        updatedBelief.aboutOpponent[TrueState.SafeLow] += strength;
+        updatedBelief.aboutOpponent[TrueState.DangerousLow] -= strength;
+      } else if (review === ReviewAction.Reject) {
+        // Opponent rejected → opponent likely believes state is dangerous
+        updatedBelief.aboutOpponent[TrueState.SafeLow] -= strength;
+        updatedBelief.aboutOpponent[TrueState.DangerousLow] += strength;
+      }
+    }
+
+    this.normalizeBelief(updatedBelief.aboutOpponent);
+
+    this.state = {
+      ...this.state,
+      agentBeliefs: {
+        ...this.state.agentBeliefs,
+        [observerKey]: updatedBelief,
+      },
+    };
+  }
+
   private normalizeBelief(belief: Record<TrueState, number>): void {
     const total = belief[TrueState.SafeLow] + belief[TrueState.DangerousLow];
     if (total > 0) {
@@ -252,6 +313,51 @@ export class MSPNGame {
       belief[TrueState.SafeLow] = 0.5;
       belief[TrueState.DangerousLow] = 0.5;
     }
+  }
+
+  /**
+   * Check if the review action agrees with the proposal (both want the same level).
+   * Agreement means: accept (reviewer agrees with proposer's level), or
+   * modify to the same level as the proposal.
+   */
+  public isAgreement(): boolean {
+    const { proposal, reviewAction } = this.state;
+    if (!proposal || !reviewAction) return false;
+
+    if (reviewAction === ReviewAction.Accept) return true;
+    if (reviewAction === ReviewAction.Reject) return false;
+
+    // Check if modification matches the proposal
+    const modifiedLevel =
+      reviewAction === ReviewAction.ModifyLow
+        ? ProtocolLevel.Low
+        : reviewAction === ReviewAction.ModifyMedium
+          ? ProtocolLevel.Medium
+          : ProtocolLevel.High;
+    return modifiedLevel === proposal;
+  }
+
+  /**
+   * Reset the game to the proposal phase for a new negotiation round,
+   * preserving beliefs and history but allowing a new proposal/review cycle.
+   */
+  public resetForNewRound(): void {
+    if (this.state.phase !== Phase.Execution) {
+      throw new Error(
+        `Cannot reset for new round in phase ${this.state.phase}`
+      );
+    }
+
+    this.state = {
+      ...this.state,
+      phase: Phase.Proposal,
+      proposal: undefined,
+      reviewAction: undefined,
+      history: [
+        ...this.state.history,
+        '--- New negotiation round ---',
+      ],
+    };
   }
 
   public endGame(): GameState {

@@ -1,4 +1,6 @@
 import OpenAI from 'openai';
+import seedrandom from 'seedrandom';
+import pLimit from 'p-limit';
 import { z } from 'zod';
 import {
   ProtocolLevel,
@@ -16,14 +18,39 @@ const LLMResponseSchema = z.object({
   action: z.string(),
 });
 
+// Rate limiting: configurable via RATE_LIMIT_MS env var (default 200ms = 5 req/sec)
+const RATE_LIMIT_MS = parseInt(process.env.RATE_LIMIT_MS || '200', 10);
+const apiLimiter = pLimit(1); // Serialize API calls
+let lastApiCallTime = 0;
+
+async function rateLimitedApiCall<T>(fn: () => Promise<T>): Promise<T> {
+  return apiLimiter(async () => {
+    const now = Date.now();
+    const elapsed = now - lastApiCallTime;
+    if (elapsed < RATE_LIMIT_MS) {
+      await new Promise((resolve) =>
+        setTimeout(resolve, RATE_LIMIT_MS - elapsed)
+      );
+    }
+    lastApiCallTime = Date.now();
+    return fn();
+  });
+}
+
 export class LLMModel {
   private client: OpenAI | null;
   private modelId: string;
   private isMockMode: boolean;
+  private rng: seedrandom.PRNG;
 
-  constructor(apiKey?: string, modelId: string = 'openai/gpt-4o-mini') {
+  constructor(
+    apiKey?: string,
+    modelId: string = 'openai/gpt-4o-mini',
+    seed?: string
+  ) {
     this.modelId = modelId;
     this.isMockMode = !apiKey || apiKey === 'mock';
+    this.rng = seedrandom(seed || 'default-agent');
 
     if (!this.isMockMode) {
       // Use OpenRouter API endpoint
@@ -61,19 +88,21 @@ export class LLMModel {
     );
 
     try {
-      const response = await this.client!.chat.completions.create({
-        model: this.modelId,
-        messages: [
-          {
-            role: 'system',
-            content:
-              'You are a strategic agent in a security negotiation game. Respond only with valid JSON.',
-          },
-          { role: 'user', content: prompt },
-        ],
-        temperature: 0.7,
-        max_tokens: 100,
-      });
+      const response = await rateLimitedApiCall(() =>
+        this.client!.chat.completions.create({
+          model: this.modelId,
+          messages: [
+            {
+              role: 'system',
+              content:
+                'You are a strategic agent in a security negotiation game. Respond only with valid JSON.',
+            },
+            { role: 'user', content: prompt },
+          ],
+          temperature: 0.7,
+          max_tokens: 100,
+        })
+      );
 
       const content = response.choices[0]?.message?.content;
       if (!content) {
@@ -114,19 +143,21 @@ export class LLMModel {
     );
 
     try {
-      const response = await this.client!.chat.completions.create({
-        model: this.modelId,
-        messages: [
-          {
-            role: 'system',
-            content:
-              'You are a strategic agent in a security negotiation game. Respond only with valid JSON.',
-          },
-          { role: 'user', content: prompt },
-        ],
-        temperature: 0.7,
-        max_tokens: 100,
-      });
+      const response = await rateLimitedApiCall(() =>
+        this.client!.chat.completions.create({
+          model: this.modelId,
+          messages: [
+            {
+              role: 'system',
+              content:
+                'You are a strategic agent in a security negotiation game. Respond only with valid JSON.',
+            },
+            { role: 'user', content: prompt },
+          ],
+          temperature: 0.7,
+          max_tokens: 100,
+        })
+      );
 
       const content = response.choices[0]?.message?.content;
       if (!content) {
@@ -149,14 +180,15 @@ export class LLMModel {
 
   private mockPropose(belief: NestedBelief): ProtocolLevel {
     const safeProb = belief.own[TrueState.SafeLow] || 0;
+    const roll = this.rng();
 
-    // Simple rule-based mock
     if (safeProb > 0.7) {
-      return ProtocolLevel.Low; // Risky but fast
+      return roll < 0.8 ? ProtocolLevel.Low : ProtocolLevel.Medium;
     } else if (safeProb > 0.4) {
-      return ProtocolLevel.Medium; // Balanced
+      if (roll < 0.6) return ProtocolLevel.Medium;
+      return roll < 0.8 ? ProtocolLevel.Low : ProtocolLevel.High;
     } else {
-      return ProtocolLevel.High; // Secure
+      return roll < 0.7 ? ProtocolLevel.High : ProtocolLevel.Medium;
     }
   }
 
@@ -165,14 +197,18 @@ export class LLMModel {
     belief: NestedBelief
   ): ReviewAction {
     const safeProb = belief.own[TrueState.SafeLow] || 0;
+    const roll = this.rng();
 
-    // Simple rule-based mock
     if (proposal === ProtocolLevel.Low && safeProb < 0.3) {
-      return ReviewAction.Reject; // Too risky
+      return roll < 0.8 ? ReviewAction.Reject : ReviewAction.ModifyMedium;
     } else if (proposal === ProtocolLevel.High && safeProb > 0.6) {
-      return ReviewAction.ModifyMedium; // Overly cautious
+      return roll < 0.7
+        ? ReviewAction.ModifyMedium
+        : roll < 0.9
+          ? ReviewAction.Accept
+          : ReviewAction.ModifyLow;
     } else {
-      return ReviewAction.Accept; // Reasonable
+      return roll < 0.7 ? ReviewAction.Accept : ReviewAction.ModifyMedium;
     }
   }
 }

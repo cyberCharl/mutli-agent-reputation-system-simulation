@@ -64,6 +64,8 @@ describe('ReputationSystem', () => {
           },
         },
         reviewAction: ReviewAction.Accept,
+        roundCount: 1,
+        converged: true,
       };
 
       repSystem.inspectAndUpdate(breachEpisode);
@@ -83,6 +85,8 @@ describe('ReputationSystem', () => {
         history: [],
         agentBeliefs: breachEpisode.agentBeliefs,
         reviewAction: ReviewAction.Accept,
+        roundCount: 1,
+        converged: true,
       };
 
       repSystem.inspectAndUpdate(coopEpisode);
@@ -172,6 +176,8 @@ describe('ReputationSystem', () => {
           },
         },
         reviewAction: ReviewAction.Accept,
+        roundCount: 1,
+        converged: true,
       };
 
       const deltas = repSystem.inspectAndUpdate(episode);
@@ -203,6 +209,8 @@ describe('ReputationSystem', () => {
           },
         },
         reviewAction: ReviewAction.Accept,
+        roundCount: 1,
+        converged: true,
       };
 
       const deltas = repSystem.inspectAndUpdate(episode);
@@ -234,6 +242,8 @@ describe('ReputationSystem', () => {
           },
         },
         reviewAction: ReviewAction.Accept,
+        roundCount: 1,
+        converged: true,
       };
 
       const deltas = repSystem.inspectAndUpdate(episode);
@@ -265,6 +275,8 @@ describe('ReputationSystem', () => {
           },
         },
         reviewAction: ReviewAction.Reject,
+        roundCount: 1,
+        converged: false,
       };
 
       const deltas = repSystem.inspectAndUpdate(episode);
@@ -294,6 +306,8 @@ describe('ReputationSystem', () => {
             },
           },
         },
+        roundCount: 1,
+        converged: false,
       };
 
       const deltas = repSystem.inspectAndUpdate(episode);

@@ -229,11 +229,11 @@ private mockPropose(belief: NestedBelief, rng: seedrandom.PRNG): ProtocolLevel {
 ```
 
 #### Definition of Done
-- [ ] Mock agent methods accept a seeded RNG instance
-- [ ] Decision logic includes probabilistic branching (not pure if/else)
-- [ ] Same seed produces same results (reproducibility preserved)
-- [ ] Different seeds produce different action distributions
-- [ ] Existing mock agent tests updated to use seeded RNG
+- [x] Mock agent methods accept a seeded RNG instance
+- [x] Decision logic includes probabilistic branching (not pure if/else)
+- [x] Same seed produces same results (reproducibility preserved)
+- [x] Different seeds produce different action distributions
+- [x] Existing mock agent tests updated to use seeded RNG
 
 #### Validation Mechanism
 ```bash
@@ -270,11 +270,11 @@ updateBeliefsFromObservation(observingAgentId: string, observedAction: Action) {
 ```
 
 #### Definition of Done
-- [ ] New function `updateBeliefsFromObservation()` implemented in game.ts
-- [ ] After each action, BOTH agents' beliefs are updated (actor updates from outcome, observer updates from witnessed action)
-- [ ] Belief updates follow Bayesian logic (observing Low proposal increases belief opponent thinks state is safe)
-- [ ] Game state tracks belief history for debugging/analysis
-- [ ] Unit tests cover observer belief updates
+- [x] New function `updateBeliefsFromObservation()` implemented in game.ts
+- [x] After each action, BOTH agents' beliefs are updated (actor updates from outcome, observer updates from witnessed action)
+- [x] Belief updates follow Bayesian logic (observing Low proposal increases belief opponent thinks state is safe)
+- [x] Game state tracks belief history for debugging/analysis
+- [x] Unit tests cover observer belief updates
 
 #### Validation Mechanism
 ```bash
@@ -309,10 +309,10 @@ async function callLLMWithRateLimit(prompt: string): Promise<string> {
 ```
 
 #### Definition of Done
-- [ ] All LLM API calls go through a rate-limited wrapper function
-- [ ] Configurable delay between calls (default 200ms = 5 req/sec)
-- [ ] Rate limit is configurable via environment variable or config
-- [ ] No 429 (rate limit) errors when running with LLM agents
+- [x] All LLM API calls go through a rate-limited wrapper function
+- [x] Configurable delay between calls (default 200ms = 5 req/sec)
+- [x] Rate limit is configurable via environment variable or config
+- [x] No 429 (rate limit) errors when running with LLM agents
 
 #### Validation Mechanism
 ```bash
@@ -342,11 +342,11 @@ The README mentions "3 rounds max" but only single rounds run. Implement:
 - Track convergence vs timeout
 
 #### Definition of Done
-- [ ] Episodes can run up to 3 negotiation rounds
-- [ ] Round exits early if both agents propose the same protocol level
-- [ ] Episode result includes: number of rounds, whether agreement was reached, final protocol
-- [ ] Game state machine handles round transitions correctly
-- [ ] Results JSON includes round count and convergence flag
+- [x] Episodes can run up to 3 negotiation rounds
+- [x] Round exits early if both agents propose the same protocol level
+- [x] Episode result includes: number of rounds, whether agreement was reached, final protocol
+- [x] Game state machine handles round transitions correctly
+- [x] Results JSON includes round count and convergence flag
 
 #### Validation Mechanism
 ```bash
@@ -562,7 +562,7 @@ npm run visualize -- --input results/old_experiment.json
 - [x] New reputation tests pass (23 new tests, 95%+ coverage)
 - [x] Karma persists across episodes (verified via logging)
 - [x] LLM prompts include karma (log inspection)
-- [ ] Mock agents show variance (run twice, compare results)
+- [x] Mock agents show variance (run twice, compare results)
 - [ ] A/B test shows measurable difference between conditions
 
 ---

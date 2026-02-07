@@ -22,11 +22,20 @@ export async function runEpisode(
   seed?: string,
   reputationSystem: ReputationSystem | null = null
 ): Promise<EpisodeResult> {
-  const game = new MSPNGame(seed ? `${seed}-${episodeId}` : undefined);
+  const episodeSeed = seed ? `${seed}-${episodeId}` : undefined;
+  const game = new MSPNGame(episodeSeed);
 
-  // Create agents
-  const modelA = new LLMModel(apiKey, 'x-ai/grok-4-fast:free');
-  const modelB = new LLMModel(apiKey, 'deepseek/deepseek-chat-v3.1:free');
+  // Create agents with seeded RNG for reproducible mock behavior
+  const modelA = new LLMModel(
+    apiKey,
+    'x-ai/grok-4-fast:free',
+    episodeSeed ? `${episodeSeed}-A` : undefined
+  );
+  const modelB = new LLMModel(
+    apiKey,
+    'deepseek/deepseek-chat-v3.1:free',
+    episodeSeed ? `${episodeSeed}-B` : undefined
+  );
   const agentA = new Agent('A', modelA);
   const agentB = new Agent('B', modelB);
 
@@ -38,46 +47,66 @@ export async function runEpisode(
     agentB.setReputation(repB.karma);
   }
 
+  const maxRounds = 3;
+
   try {
-    // Phase 1: Proposal
-    const state = game.getState();
-    const opponentKarmaForA =
-      useReputation && reputationSystem
-        ? reputationSystem.getModelReputation('model-B').karma
-        : undefined;
-    const proposal = await agentA.act(
-      'propose',
-      state.agentBeliefs.a,
-      state.history,
-      undefined,
-      opponentKarmaForA
-    );
+    let roundCount = 0;
+    let converged = false;
 
-    // Apply reputation consequences
-    const finalProposal = agentA.applyConsequences(proposal) as ProtocolLevel;
-    game.setProposal(finalProposal);
+    for (let round = 0; round < maxRounds; round++) {
+      roundCount = round + 1;
 
-    // Phase 2: Review
-    const reviewState = game.getState();
-    const opponentKarmaForB =
-      useReputation && reputationSystem
-        ? reputationSystem.getModelReputation('model-A').karma
-        : undefined;
-    const reviewAction = await agentB.act(
-      'review',
-      reviewState.agentBeliefs.b,
-      reviewState.history,
-      reviewState.proposal,
-      opponentKarmaForB
-    );
+      // Phase 1: Proposal
+      const state = game.getState();
+      const opponentKarmaForA =
+        useReputation && reputationSystem
+          ? reputationSystem.getModelReputation('model-B').karma
+          : undefined;
+      const proposal = await agentA.act(
+        'propose',
+        state.agentBeliefs.a,
+        state.history,
+        undefined,
+        opponentKarmaForA
+      );
 
-    // Apply reputation consequences
-    const finalReviewAction = agentB.applyConsequences(
-      reviewAction
-    ) as ReviewAction;
-    game.setReview(finalReviewAction);
+      // Apply reputation consequences
+      const finalProposal = agentA.applyConsequences(
+        proposal
+      ) as ProtocolLevel;
+      game.setProposal(finalProposal);
 
-    // Phase 3: Execution
+      // Phase 2: Review
+      const reviewState = game.getState();
+      const opponentKarmaForB =
+        useReputation && reputationSystem
+          ? reputationSystem.getModelReputation('model-A').karma
+          : undefined;
+      const reviewAction = await agentB.act(
+        'review',
+        reviewState.agentBeliefs.b,
+        reviewState.history,
+        reviewState.proposal,
+        opponentKarmaForB
+      );
+
+      // Apply reputation consequences
+      const finalReviewAction = agentB.applyConsequences(
+        reviewAction
+      ) as ReviewAction;
+      game.setReview(finalReviewAction);
+
+      // Check for agreement or final round
+      if (game.isAgreement() || round === maxRounds - 1) {
+        converged = game.isAgreement();
+        break;
+      }
+
+      // No agreement yet and more rounds remain — reset for next round
+      game.resetForNewRound();
+    }
+
+    // Phase 3: Execution (resolve the final proposal/review)
     const finalState = game.resolveExecution();
 
     // Apply payoff penalties
@@ -97,6 +126,8 @@ export async function runEpisode(
       history: finalState.history,
       agentBeliefs: finalState.agentBeliefs,
       reviewAction: finalState.reviewAction,
+      roundCount,
+      converged,
     };
 
     // Update reputation if enabled
