@@ -9,6 +9,7 @@
     "test:openrouter": "jest tests/openrouter.test.ts",
     "build": "tsc",
     "compare": "ts-node src/cli.ts",
+    "visualize": "ts-node src/visualize.ts",
     "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\"",
     "lint": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\""
   },

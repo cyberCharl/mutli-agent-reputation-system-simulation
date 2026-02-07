@@ -528,11 +528,11 @@ Options:
 - Quick: Just output CSVs and use external tools (Excel, Jupyter)
 
 #### Definition of Done
-- [ ] At least one visualization method implemented
-- [ ] Charts show: karma over time, payoff distribution, action frequencies
-- [ ] Baseline vs treatment comparison visible
-- [ ] Can regenerate from any results JSON file
-- [ ] Output is shareable (HTML file or hosted app)
+- [x] At least one visualization method implemented
+- [x] Charts show: karma over time, payoff distribution, action frequencies
+- [x] Baseline vs treatment comparison visible
+- [x] Can regenerate from any results JSON file
+- [x] Output is shareable (HTML file or hosted app)
 
 #### Validation Mechanism
 ```bash
@@ -563,7 +563,7 @@ npm run visualize -- --input results/old_experiment.json
 - [x] Karma persists across episodes (verified via logging)
 - [x] LLM prompts include karma (log inspection)
 - [x] Mock agents show variance (run twice, compare results)
-- [ ] A/B test shows measurable difference between conditions
+- [x] A/B test shows measurable difference between conditions
 
 ---
 
