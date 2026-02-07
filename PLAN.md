@@ -61,11 +61,11 @@ async function runEpisode(
 ```
 
 #### Definition of Done
-- [ ] `runABTest()` creates a single `ReputationSystem` instance before the episode loop
-- [ ] `runEpisode()` accepts an optional `ReputationSystem` parameter instead of creating its own
-- [ ] Karma values accumulate visibly across episodes (agent who breaches in episode 1 has lower karma in episode 5)
-- [ ] TypeScript compiles with no errors
-- [ ] All existing tests pass
+- [x] `runABTest()` creates a single `ReputationSystem` instance before the episode loop
+- [x] `runEpisode()` accepts an optional `ReputationSystem` parameter instead of creating its own
+- [x] Karma values accumulate visibly across episodes (agent who breaches in episode 1 has lower karma in episode 5)
+- [x] TypeScript compiles with no errors
+- [x] All existing tests pass
 
 #### Validation Mechanism
 ```bash
@@ -112,11 +112,11 @@ ${karmaContext}
 **Update review prompt similarly** — include breach history warning if karma is low.
 
 #### Definition of Done
-- [ ] `buildProposalPrompt()` accepts optional `karma` and `opponentKarma` parameters
-- [ ] `buildReviewPrompt()` accepts optional `karma` and `opponentKarma` parameters
-- [ ] Generated prompts include karma context when values are provided
-- [ ] Low karma (< 30) triggers a warning message in the prompt
-- [ ] Callers in `agent.ts` pass karma values when available
+- [x] `buildProposalPrompt()` accepts optional `karma` and `opponentKarma` parameters
+- [x] `buildReviewPrompt()` accepts optional `karma` and `opponentKarma` parameters
+- [x] Generated prompts include karma context when values are provided
+- [x] Low karma (< 30) triggers a warning message in the prompt
+- [x] Callers in `agent.ts` pass karma values when available
 
 #### Validation Mechanism
 ```bash
@@ -178,10 +178,10 @@ describe('ReputationSystem', () => {
 ```
 
 #### Definition of Done
-- [ ] `tests/reputation.test.ts` exists with at least 5 test cases
-- [ ] Tests cover: initial karma, accumulation, blocking threshold, clamping (min/max), and karma retrieval for unknown agents
-- [ ] All reputation tests pass
-- [ ] Test coverage for `src/reputation.ts` is ≥ 80%
+- [x] `tests/reputation.test.ts` exists with at least 5 test cases
+- [x] Tests cover: initial karma, accumulation, blocking threshold, clamping (min/max), and karma retrieval for unknown agents
+- [x] All reputation tests pass
+- [x] Test coverage for `src/reputation.ts` is ≥ 80%
 
 #### Validation Mechanism
 ```bash
@@ -558,10 +558,10 @@ npm run visualize -- --input results/old_experiment.json
 
 ## Testing Checklist
 
-- [ ] All existing tests still pass
-- [ ] New reputation tests pass
-- [ ] Karma persists across episodes (manual verification)
-- [ ] LLM prompts include karma (log inspection)
+- [x] All existing tests still pass
+- [x] New reputation tests pass (23 new tests, 95%+ coverage)
+- [x] Karma persists across episodes (verified via logging)
+- [x] LLM prompts include karma (log inspection)
 - [ ] Mock agents show variance (run twice, compare results)
 - [ ] A/B test shows measurable difference between conditions
 
