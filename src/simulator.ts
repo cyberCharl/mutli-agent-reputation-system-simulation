@@ -61,12 +61,12 @@ export async function runEpisode(
   // Create agents with seeded RNG for reproducible mock behavior
   const modelA = new LLMModel(
     apiKey,
-    'x-ai/grok-4-fast:free',
+    'google/gemini-2.5-flash-lite',
     episodeSeed ? `${episodeSeed}-A` : undefined
   );
   const modelB = new LLMModel(
     apiKey,
-    'deepseek/deepseek-chat-v3.1:free',
+    'mistralai/mistral-small-3.1-24b-instruct',
     episodeSeed ? `${episodeSeed}-B` : undefined
   );
   const agentA = new Agent('A', modelA);
