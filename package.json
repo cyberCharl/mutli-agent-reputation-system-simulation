@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "ts-node src/simulator.ts",
     "test": "jest",
+    "test:openrouter": "jest tests/openrouter.test.ts",
     "build": "tsc",
+    "compare": "ts-node src/cli.ts",
     "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\"",
     "lint": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\""
   },

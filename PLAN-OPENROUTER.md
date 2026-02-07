@@ -61,12 +61,12 @@ export class OpenRouterClient {
 ```
 
 #### Definition of Done
-- [ ] `src/openrouter.ts` exports `OpenRouterClient` class
-- [ ] Client supports all 4 target models
-- [ ] Structured output works with JSON schema validation
-- [ ] Rate limiting prevents 429 errors
-- [ ] Each request returns cost and latency metrics
-- [ ] Unit tests cover success, failure, and retry paths
+- [x] `src/openrouter.ts` exports `OpenRouterClient` class
+- [x] Client supports all 4 target models
+- [x] Structured output works with JSON schema validation
+- [x] Rate limiting prevents 429 errors
+- [x] Each request returns cost and latency metrics
+- [x] Unit tests cover success, failure, and retry paths
 
 #### Validation
 ```bash
@@ -122,11 +122,11 @@ export const ReviewResponseSchema = {
 ```
 
 #### Definition of Done
-- [ ] `src/schemas.ts` exports `ProposalResponseSchema` and `ReviewResponseSchema`
-- [ ] Schemas include reasoning field for causal tracing
-- [ ] Schemas include confidence/trust metrics for analysis
-- [ ] All schema fields have proper types and constraints
-- [ ] TypeScript types generated from schemas match runtime validation
+- [x] `src/schemas.ts` exports `ProposalResponseSchema` and `ReviewResponseSchema`
+- [x] Schemas include reasoning field for causal tracing
+- [x] Schemas include confidence/trust metrics for analysis
+- [x] All schema fields have proper types and constraints
+- [x] TypeScript types generated from schemas match runtime validation
 
 #### Validation
 ```bash
@@ -167,12 +167,12 @@ interface ComparisonResults {
 ```
 
 #### Definition of Done
-- [ ] `src/compare.ts` exports `runComparison()` function
-- [ ] CLI supports `npm run compare -- --models "gemini,deepseek,kimi,mistral"`
-- [ ] Same random seed used across all models for fair comparison
-- [ ] Results include per-model aggregates and head-to-head matchups
-- [ ] Cost tracking shows total spend per model
-- [ ] Comparison summary saved to `results/<run-id>/comparison.json`
+- [x] `src/compare.ts` exports `runComparison()` function
+- [x] CLI supports `npm run compare -- --models "gemini,deepseek,kimi,mistral"`
+- [x] Same random seed used across all models for fair comparison
+- [x] Results include per-model aggregates and head-to-head matchups
+- [x] Cost tracking shows total spend per model
+- [x] Comparison summary saved to `results/<run-id>/comparison.json`
 
 #### Validation
 ```bash
