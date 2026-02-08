@@ -1,181 +1,208 @@
-# MSPN Simulation: Misaligned Secure Protocol Negotiation
+# Karmic Debt: Multi-Agent Reputation Simulation
 
-A TypeScript simulation of the Misaligned Secure Protocol Negotiation (MSPN) hypergame for researching multi-agent security with LLM agents, focusing on reputation systems via A/B testing.
+A TypeScript simulation framework for studying reputation dynamics in LLM-to-LLM negotiations, using the MSPN (Misaligned Secure Protocol Negotiation) hypergame.
 
 ## Overview
 
-This project implements a full simulation of the MSPN hypergame where 2 LLM agents (A: Proposer, B: Reviewer) negotiate a secure protocol under nested beliefs and perceptual misalignments. It integrates a karma-like reputation system tied to base models and supports A/B testing between baseline (no reputation) and with-reputation scenarios.
+Two LLM agents negotiate security protocol levels under uncertainty. A karma-based reputation system tracks behavior across episodes, applying consequences (action restrictions, payoff penalties) to test whether inherited reputation changes agent decision-making.
 
-## Game Rules
+**Research questions:**
+- Does reputation visibility change negotiation behavior?
+- How do karma consequences affect cooperation rates?
+- Can we detect behavioral differences between baseline and reputation conditions?
 
-- **Players**: 2 agents (A: Proposer, B: Reviewer) with asymmetric roles
-- **Objective**: Negotiate a protocol for secure data sharing
-- **Phases**: Sequential, 3 rounds max with early end on agreement/reject
-  1. **Proposal**: A proposes ProtocolLevel ('low' | 'medium' | 'high')
-  2. **Review**: B chooses ReviewAction ('accept' | 'modify-low' | 'modify-medium' | 'modify-high' | 'reject')
-  3. **Execution**: Resolve final protocol and payoffs
+## The MSPN Game
 
-### Hidden Elements & Nested Beliefs
+### Scenario
 
-- **True State**: 'risk-low-safe' or 'risk-low-dangerous' (randomized 50/50)
-- **Beliefs**: Each agent has nested beliefs about the true state and opponent's beliefs
-- **Updates**: Beliefs update via simple Bayes after actions
+Agents negotiate a security protocol level for a joint operation. The true risk state is hidden — agents have probabilistic beliefs that update based on observed actions.
 
-### Payoffs
+### Roles
 
-| Outcome             | A Payoff | B Payoff | Condition                     |
-| ------------------- | -------- | -------- | ----------------------------- |
-| Secure Coordination | 10       | 10       | Agreed high/medium, any state |
-| Risky Success       | 12       | 8        | Agreed low, safe state        |
-| Breach              | -5       | -5       | Agreed low, dangerous state   |
-| Misalignment/Reject | 2        | 2        | Reject or incompatible        |
+- **Agent A (Proposer):** Proposes a protocol level
+- **Agent B (Reviewer):** Accepts, modifies, or rejects the proposal
 
-### Reputation System
+### Protocol Levels
 
-- Post-episode "inspection" of history
-- Karma 0-100, persistent per model ID
-- Consequences: If karma <30, block risky actions or penalize payoffs by 50%
+| Level | Risk | Payoff Profile |
+|-------|------|----------------|
+| High | Safe | Guaranteed 10/10 |
+| Medium | Safe | Guaranteed 10/10 |
+| Low | Risky | 12/8 if safe, -5/-5 if breach |
 
-## Setup
+### Game Phases
 
-### Prerequisites
+```
+1. PROPOSAL  → A proposes: Low | Medium | High
+2. REVIEW    → B responds: Accept | Modify | Reject
+3. EXECUTION → Payoffs calculated based on protocol + hidden state
+```
 
-- Node.js 18+
-- npm or yarn
+Up to 3 negotiation rounds per episode.
 
-### Installation
+### Payoff Matrix
 
-1. Clone the repository:
+| Final Protocol | True State | Payoff A | Payoff B |
+|---------------|------------|----------|----------|
+| High/Medium | Either | 10 | 10 |
+| Low | SafeLow | 12 | 8 |
+| Low | DangerousLow | -5 | -5 |
+| Reject | — | 2 | 2 |
+
+## Karma System
+
+### How Karma Changes
+
+After each episode, behavior is evaluated:
+
+| Agent | Action | Outcome | Karma Delta |
+|-------|--------|---------|-------------|
+| A | Proposed Low | Breach | -20 |
+| A | Proposed Low | Safe success | +5 |
+| A | Proposed High/Med | Secure coordination | +3 |
+| B | Accepted Low | Breach | -15 |
+| B | Accepted Low | Safe success | +5 |
+| B | Rejected | Would have been breach | +10 |
+| B | Rejected | Would have been safe | -5 |
+
+### Karma Consequences
+
+| Karma Range | Blocked Actions | Payoff Penalty | Auto-Reject |
+|-------------|-----------------|----------------|-------------|
+| < 20 | Low protocol | 50% | Yes |
+| 20-29 | Low protocol | 30% | No |
+| 30-49 | None | 10% | No |
+| ≥ 50 | None | 0% | No |
+
+Karma persists across simulation runs via `data/karma.json`.
+
+## Installation
 
 ```bash
+# Clone and install
 git clone <repository-url>
-cd mspn-simulation
-```
-
-2. Install dependencies:
-
-```bash
+cd mutli-agent-reputation-system-simulation
 npm install
-```
 
-3. Set up environment variables:
-
-```bash
+# Configure API key (optional — falls back to mock agents)
 cp env.example .env
-# Edit .env and add your OpenRouter API key
+# Add OPENROUTER_API_KEY to .env
 ```
-
-### Configuration
-
-The project uses the following configuration files:
-
-- `tsconfig.json`: TypeScript configuration with strict mode
-- `.prettierrc.json`: Code formatting (80 char width)
-- `jest.config.js`: Test configuration
 
 ## Usage
 
-### Running Simulations
-
-1. **Basic A/B Test** (uses mock agents if no API key):
+### Run A/B Test
 
 ```bash
+# Basic run (100 episodes, mock agents if no API key)
 npm run dev
+
+# Custom parameters: episodes, seed, concurrency
+npm run dev 200 my-seed 8
 ```
 
-2. **Custom Parameters**:
+### Model Comparison
+
+Compare specific LLM models head-to-head:
 
 ```bash
-npm run dev [numEpisodes] [seed]
-# Example: npm run dev 200 test-seed-123
+npm run compare -- --modelA google/gemini-2.5-flash-lite --modelB mistralai/mistral-small-3.1-24b-instruct --episodes 20
 ```
 
-3. **With OpenRouter API** (set OPENROUTER_API_KEY in .env):
+### Generate Visualization
 
 ```bash
-npm run dev 100
+npm run visualize -- --input results/run_YYYY-MM-DD_HH-MM-SS_eps-N_seed-X
 ```
 
-### Available Scripts
+Generates `dashboard.html` with:
+- Karma over time charts
+- Payoff distribution histograms
+- Action frequency breakdown
+- Statistical significance table
 
-- `npm run dev`: Run the main simulator
-- `npm test`: Run Jest unit tests
-- `npm run build`: Compile TypeScript to JavaScript
-- `npm run format`: Format code with Prettier
-- `npm run lint`: Check code formatting
+### Run Tests
 
-### Output
-
-The simulator generates:
-
-- Console logs with progress and results
-- Layered results under `results/<run-id>/`:
-  - `summary.json`: Run parameters and aggregate metrics
-  - `baseline/episodes.json`: All baseline episode objects
-  - `baseline/episode_<n>.json`: One file per baseline episode
-  - `reputation/episodes.json`: All reputation episode objects
-  - `reputation/episode_<n>.json`: One file per reputation episode
-
-`<run-id>` format: `run_YYYY-MM-DD_HH-MM-SS_eps-<num>_seed-<seed>`
-
-### Metrics Explained
-
-- **Cooperation Rate**: % of episodes with secure high/medium agreements
-- **Breach Rate**: % of episodes with negative payoffs (breaches)
-- **Average Payoffs**: Mean payoffs for agents A and B
-- **Reputation Stats**: Karma distribution and consequences
+```bash
+npm test                    # All tests (113 passing)
+npm run test:openrouter     # OpenRouter integration tests
+```
 
 ## Project Structure
 
 ```
 src/
-├── types.ts          # Type definitions and interfaces
-├── prompts.ts        # LLM prompt templates
-├── game.ts           # Core game logic (MSPNGame class)
-├── agent.ts          # LLM integration and mock agents
+├── game.ts           # MSPN game logic, belief updates
+├── agent.ts          # LLM agent wrapper, mock fallback
 ├── reputation.ts     # Karma system and consequences
-└── simulator.ts      # Episode runner and A/B testing
+├── simulator.ts      # A/B test runner, parallel execution
+├── compare.ts        # Model-vs-model comparison
+├── stats.ts          # Statistical significance (t-test, bootstrap CI)
+├── visualize.ts      # HTML dashboard generation
+├── karma/
+│   └── storage.ts    # Persistent karma (atomic JSON writes)
+├── types.ts          # Type definitions
+├── prompts.ts        # LLM prompt templates
+├── schemas.ts        # Zod schemas for structured output
+└── openrouter.ts     # OpenRouter API client
 
-tests/
-└── game.test.ts      # Jest unit tests
-
-Configuration files:
-├── package.json      # Dependencies and scripts
-├── tsconfig.json     # TypeScript configuration
-├── .prettierrc.json  # Code formatting
-└── jest.config.js    # Test configuration
+.ai/plans/            # AI-generated development plans
+data/                 # Persistent karma storage
+results/              # Simulation run outputs
+tests/                # Jest test suites
 ```
 
-## Development
+## Key Features
 
-### Adding New Features
+- **Parallel Episode Execution:** Configurable concurrency with `p-limit`
+- **Statistical Analysis:** Paired t-tests and bootstrap confidence intervals
+- **Persistent Karma:** Atomic writes, survives across runs
+- **Structured Output:** Zod schemas for reliable LLM JSON parsing
+- **Visualization Dashboard:** Self-contained HTML with Chart.js
+- **Reproducible Runs:** Seeded RNG for deterministic replay
 
-1. **New Agent Types**: Extend the `Agent` class in `src/agent.ts`
-2. **New Game Rules**: Modify `MSPNGame` class in `src/game.ts`
-3. **New Reputation Rules**: Update `ReputationSystem` in `src/reputation.ts`
+## Output Format
 
-### Testing
+Results are saved to `results/run_<timestamp>_eps-<n>_seed-<s>/`:
 
-Run the test suite:
-
-```bash
-npm test
+```
+summary.json           # Aggregate metrics, statistical significance
+baseline/
+  episodes.json        # All baseline episode data
+  episode_*.json       # Individual episode files
+reputation/
+  episodes.json        # All reputation condition data
+  episode_*.json       # Individual episode files
+dashboard.html         # Visualization (after running visualize)
 ```
 
-The tests cover:
+## Configuration
 
-- Game state management
-- Belief updates
-- Payoff calculations
-- Reproducibility with seeds
+### Environment Variables
 
-## Contributing
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `OPENROUTER_API_KEY` | OpenRouter API key | No (uses mock) |
 
-1. Follow the existing code style
-2. Add tests for new features
-3. Update documentation as needed
-4. Ensure all tests pass before submitting
+### Game Config (in code)
+
+```typescript
+{
+  maxRounds: 3,
+  beliefUpdateStrength: { proposal: 0.2, review: 0.15 },
+  payoffNoise: 1,
+  initialBeliefAlignment: 0.7
+}
+```
+
+## Known Limitations
+
+1. **Two-agent only:** Architecture is coupled to A/B roles (proposer/reviewer)
+2. **Mock agents are deterministic:** Same seed = identical results regardless of karma
+3. **Simulator LLM parsing:** Falls back to mock if models return markdown-wrapped JSON
+
+See `.ai/plans/PLAN.md` for roadmap and planned improvements.
 
 ## License
 
-MIT License - see LICENSE file for details.
+MIT
