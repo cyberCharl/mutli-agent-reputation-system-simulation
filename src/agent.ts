@@ -1,7 +1,4 @@
-import OpenAI from 'openai';
 import seedrandom from 'seedrandom';
-import pLimit from 'p-limit';
-import { z } from 'zod';
 import {
   ProtocolLevel,
   ReviewAction,
@@ -9,43 +6,58 @@ import {
   AgentId,
   ModelRep,
   ReputationConsequences,
-  LLMResponse,
   TrueState,
 } from './types';
 import { formatProposalPrompt, formatReviewPrompt } from './prompts';
+import { OpenRouterClient } from './openrouter';
+import {
+  ProposalResponseSchema,
+  ReviewResponseSchema,
+  ProposalResponseJsonSchema,
+  ReviewResponseJsonSchema,
+} from './schemas';
 
-const LLMResponseSchema = z.object({
-  action: z.string(),
-});
+function mapProposalToProtocol(proposal: string): ProtocolLevel {
+  const map: Record<string, ProtocolLevel> = {
+    Low: ProtocolLevel.Low,
+    Medium: ProtocolLevel.Medium,
+    High: ProtocolLevel.High,
+  };
+  return map[proposal] || ProtocolLevel.Medium;
+}
 
-// Rate limiting: configurable via RATE_LIMIT_MS env var (default 200ms = 5 req/sec)
-const RATE_LIMIT_MS = parseInt(process.env.RATE_LIMIT_MS || '200', 10);
-const apiLimiter = pLimit(1); // Serialize API calls
-let lastApiCallTime = 0;
+function mapDecisionToReviewAction(
+  decision: string,
+  counterProposal?: string | null
+): ReviewAction {
+  if (decision === 'Accept') return ReviewAction.Accept;
+  if (decision === 'Reject') return ReviewAction.Reject;
+  // Modify — use counter_proposal or default to ModifyMedium
+  if (counterProposal === 'Low') return ReviewAction.ModifyLow;
+  if (counterProposal === 'High') return ReviewAction.ModifyHigh;
+  return ReviewAction.ModifyMedium;
+}
 
-async function rateLimitedApiCall<T>(fn: () => Promise<T>): Promise<T> {
-  return apiLimiter(async () => {
-    const now = Date.now();
-    const elapsed = now - lastApiCallTime;
-    if (elapsed < RATE_LIMIT_MS) {
-      await new Promise((resolve) =>
-        setTimeout(resolve, RATE_LIMIT_MS - elapsed)
-      );
-    }
-    lastApiCallTime = Date.now();
-    return fn();
-  });
+export interface DecisionMetadata {
+  reasoning: string;
+  confidence?: number;
+  beliefState?: {
+    own_safety_belief: number;
+    opponent_cooperation_belief: number;
+  };
+  trustAssessment?: number;
 }
 
 export class LLMModel {
-  private client: OpenAI | null;
+  private openRouterClient: OpenRouterClient | null;
   private modelId: string;
   private isMockMode: boolean;
   private rng: seedrandom.PRNG;
+  private lastDecisionMetadata: DecisionMetadata | null = null;
 
   constructor(
     apiKey?: string,
-    modelId: string = 'openai/gpt-4o-mini',
+    modelId: string = 'google/gemini-2.5-flash-lite',
     seed?: string
   ) {
     this.modelId = modelId;
@@ -53,19 +65,17 @@ export class LLMModel {
     this.rng = seedrandom(seed || 'default-agent');
 
     if (!this.isMockMode) {
-      // Use OpenRouter API endpoint
-      this.client = new OpenAI({
-        apiKey,
-        baseURL: 'https://openrouter.ai/api/v1',
-        defaultHeaders: {
-          'HTTP-Referer':
-            'https://github.com/cyberCharl/mutli-agent-reputation-system-simulation',
-          'X-Title': 'MSPN Simulation',
-        },
+      this.openRouterClient = new OpenRouterClient({
+        apiKey: apiKey!,
+        model: modelId,
       });
     } else {
-      this.client = null;
+      this.openRouterClient = null;
     }
+  }
+
+  public getLastDecisionMetadata(): DecisionMetadata | null {
+    return this.lastDecisionMetadata;
   }
 
   public async decidePropose(
@@ -76,6 +86,7 @@ export class LLMModel {
     opponentKarma?: number
   ): Promise<ProtocolLevel> {
     if (this.isMockMode) {
+      this.lastDecisionMetadata = null;
       return this.mockPropose(belief);
     }
 
@@ -88,37 +99,23 @@ export class LLMModel {
     );
 
     try {
-      const response = await rateLimitedApiCall(() =>
-        this.client!.chat.completions.create({
-          model: this.modelId,
-          messages: [
-            {
-              role: 'system',
-              content:
-                'You are a strategic agent in a security negotiation game. Respond only with valid JSON.',
-            },
-            { role: 'user', content: prompt },
-          ],
-          temperature: 0.7,
-          max_tokens: 100,
-        })
+      const response = await this.openRouterClient!.complete(
+        prompt,
+        ProposalResponseJsonSchema,
+        ProposalResponseSchema,
+        { temperature: 0.7 }
       );
 
-      const content = response.choices[0]?.message?.content;
-      if (!content) {
-        throw new Error('No response content from LLM');
-      }
+      this.lastDecisionMetadata = {
+        reasoning: response.data.reasoning,
+        confidence: response.data.confidence,
+        beliefState: response.data.belief_state,
+      };
 
-      const parsed = LLMResponseSchema.parse(JSON.parse(content));
-      const action = parsed.action.toLowerCase();
-
-      if (Object.values(ProtocolLevel).includes(action as ProtocolLevel)) {
-        return action as ProtocolLevel;
-      } else {
-        throw new Error(`Invalid proposal action: ${action}`);
-      }
+      return mapProposalToProtocol(response.data.proposal);
     } catch (error) {
       console.warn(`LLM proposal failed, using mock: ${error}`);
+      this.lastDecisionMetadata = null;
       return this.mockPropose(belief);
     }
   }
@@ -131,6 +128,7 @@ export class LLMModel {
     opponentKarma?: number
   ): Promise<ReviewAction> {
     if (this.isMockMode) {
+      this.lastDecisionMetadata = null;
       return this.mockReview(proposal, belief);
     }
 
@@ -143,37 +141,25 @@ export class LLMModel {
     );
 
     try {
-      const response = await rateLimitedApiCall(() =>
-        this.client!.chat.completions.create({
-          model: this.modelId,
-          messages: [
-            {
-              role: 'system',
-              content:
-                'You are a strategic agent in a security negotiation game. Respond only with valid JSON.',
-            },
-            { role: 'user', content: prompt },
-          ],
-          temperature: 0.7,
-          max_tokens: 100,
-        })
+      const response = await this.openRouterClient!.complete(
+        prompt,
+        ReviewResponseJsonSchema,
+        ReviewResponseSchema,
+        { temperature: 0.7 }
       );
 
-      const content = response.choices[0]?.message?.content;
-      if (!content) {
-        throw new Error('No response content from LLM');
-      }
+      this.lastDecisionMetadata = {
+        reasoning: response.data.reasoning,
+        trustAssessment: response.data.trust_assessment,
+      };
 
-      const parsed = LLMResponseSchema.parse(JSON.parse(content));
-      const action = parsed.action.toLowerCase();
-
-      if (Object.values(ReviewAction).includes(action as ReviewAction)) {
-        return action as ReviewAction;
-      } else {
-        throw new Error(`Invalid review action: ${action}`);
-      }
+      return mapDecisionToReviewAction(
+        response.data.decision,
+        response.data.counter_proposal
+      );
     } catch (error) {
       console.warn(`LLM review failed, using mock: ${error}`);
+      this.lastDecisionMetadata = null;
       return this.mockReview(proposal, belief);
     }
   }
@@ -258,6 +244,10 @@ export class Agent {
         opponentKarma
       );
     }
+  }
+
+  public getLastDecisionMetadata(): DecisionMetadata | null {
+    return this.model.getLastDecisionMetadata();
   }
 
   private getReputationWarning(): string | undefined {

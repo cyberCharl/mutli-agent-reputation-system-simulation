@@ -64,6 +64,7 @@ export interface EpisodeResult {
   reputationDeltas?: { a: number; b: number };
   roundCount: number;
   converged: boolean;
+  decisionLog?: import('./causal').CausalDecisionLog;
 }
 
 export interface ABTestMetrics {

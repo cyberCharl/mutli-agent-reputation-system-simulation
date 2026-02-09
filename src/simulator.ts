@@ -12,9 +12,11 @@ import {
   ReviewAction,
   TrueState,
   StatisticalSignificance,
+  NestedBelief,
 } from './types';
 import { pairedTTest, bootstrapCI } from './stats';
 import { KarmaStorage } from './karma/storage';
+import { CausalDecisionLog, CausalDecisionRecord } from './causal';
 
 const DEFAULT_CONCURRENCY = 4;
 
@@ -48,6 +50,23 @@ class AsyncMutex {
 // Load environment variables from .env file
 config();
 
+function computeExpectedPayoff(
+  protocol: ProtocolLevel | undefined,
+  beliefs: NestedBelief
+): number {
+  if (!protocol) return 2; // rejection payoff
+  if (
+    protocol === ProtocolLevel.High ||
+    protocol === ProtocolLevel.Medium
+  ) {
+    return 10; // secure coordination, no state dependence
+  }
+  // Low protocol: depends on true state belief
+  const safeProb = beliefs.own[TrueState.SafeLow] || 0.5;
+  // Expected: safeProb * avg(12,8) + (1-safeProb) * (-5)
+  return safeProb * 10 + (1 - safeProb) * -5;
+}
+
 export async function runEpisode(
   episodeId: number,
   apiKey?: string,
@@ -57,6 +76,7 @@ export async function runEpisode(
 ): Promise<EpisodeResult> {
   const episodeSeed = seed ? `${seed}-${episodeId}` : undefined;
   const game = new MSPNGame(episodeSeed);
+  const causalLog = new CausalDecisionLog(episodeSeed || `default-${episodeId}`);
 
   // Create agents with seeded RNG for reproducible mock behavior
   const modelA = new LLMModel(
@@ -81,6 +101,7 @@ export async function runEpisode(
   }
 
   const maxRounds = 3;
+  const allDecisionIds: string[] = [];
 
   try {
     let roundCount = 0;
@@ -91,10 +112,21 @@ export async function runEpisode(
 
       // Phase 1: Proposal
       const state = game.getState();
+      const karmaA = agentA.getReputation().karma;
       const opponentKarmaForA =
         useReputation && reputationSystem
           ? reputationSystem.getModelReputation('model-B').karma
           : undefined;
+
+      // Snapshot pre-decision state for proposer
+      const proposerDecisionId = causalLog.generateDecisionId();
+      const proposerInfoSet = {
+        ownKarma: karmaA,
+        opponentKarma: opponentKarmaForA ?? 50,
+        beliefs: JSON.parse(JSON.stringify(state.agentBeliefs.a)) as NestedBelief,
+        historyVisible: [...state.history],
+      };
+
       const proposal = await agentA.act(
         'propose',
         state.agentBeliefs.a,
@@ -107,14 +139,43 @@ export async function runEpisode(
       const finalProposal = agentA.applyConsequences(
         proposal
       ) as ProtocolLevel;
+      const proposalWasForced = finalProposal !== proposal;
       game.setProposal(finalProposal);
+
+      // Record proposer decision
+      const proposerMetadata = agentA.getLastDecisionMetadata();
+      const proposerRecord: CausalDecisionRecord = {
+        traceId: causalLog.traceId,
+        decisionId: proposerDecisionId,
+        informationSet: proposerInfoSet,
+        action: {
+          type: 'propose',
+          value: finalProposal,
+          reasoning: proposerMetadata?.reasoning ?? 'mock',
+          alternatives: ['low', 'medium', 'high'],
+          isForced: proposalWasForced,
+        },
+      };
+      causalLog.addRecord(proposerRecord);
+      allDecisionIds.push(proposerDecisionId);
 
       // Phase 2: Review
       const reviewState = game.getState();
+      const karmaB = agentB.getReputation().karma;
       const opponentKarmaForB =
         useReputation && reputationSystem
           ? reputationSystem.getModelReputation('model-A').karma
           : undefined;
+
+      // Snapshot pre-decision state for reviewer
+      const reviewerDecisionId = causalLog.generateDecisionId();
+      const reviewerInfoSet = {
+        ownKarma: karmaB,
+        opponentKarma: opponentKarmaForB ?? 50,
+        beliefs: JSON.parse(JSON.stringify(reviewState.agentBeliefs.b)) as NestedBelief,
+        historyVisible: [...reviewState.history],
+      };
+
       const reviewAction = await agentB.act(
         'review',
         reviewState.agentBeliefs.b,
@@ -127,7 +188,26 @@ export async function runEpisode(
       const finalReviewAction = agentB.applyConsequences(
         reviewAction
       ) as ReviewAction;
+      const reviewWasForced = finalReviewAction !== reviewAction;
       game.setReview(finalReviewAction);
+
+      // Record reviewer decision
+      const reviewerMetadata = agentB.getLastDecisionMetadata();
+      const reviewerRecord: CausalDecisionRecord = {
+        traceId: causalLog.traceId,
+        decisionId: reviewerDecisionId,
+        parentDecisionId: proposerDecisionId,
+        informationSet: reviewerInfoSet,
+        action: {
+          type: 'review',
+          value: finalReviewAction,
+          reasoning: reviewerMetadata?.reasoning ?? 'mock',
+          alternatives: ['accept', 'reject', 'modify-low', 'modify-medium', 'modify-high'],
+          isForced: reviewWasForced,
+        },
+      };
+      causalLog.addRecord(reviewerRecord);
+      allDecisionIds.push(reviewerDecisionId);
 
       // Check for agreement or final round
       if (game.isAgreement() || round === maxRounds - 1) {
@@ -151,6 +231,60 @@ export async function runEpisode(
       };
     }
 
+    // Back-fill outcome data on all causal records
+    for (const record of causalLog.getRecords()) {
+      const isProposer = record.action.type === 'propose';
+      const agentPayoff = isProposer ? finalPayoffs.a : finalPayoffs.b;
+      const counterpartyAction = isProposer
+        ? (finalState.reviewAction ?? 'none')
+        : (finalState.proposal ?? 'none');
+      const expectedPayoff = computeExpectedPayoff(
+        finalState.finalProtocol,
+        record.informationSet.beliefs
+      );
+
+      causalLog.backfillOutcome(record.decisionId, {
+        counterpartyAction: String(counterpartyAction),
+        finalProtocol: finalState.finalProtocol,
+        payoff: agentPayoff,
+        expectedPayoff: Math.round(expectedPayoff * 100) / 100,
+        surprise: Math.round(Math.abs(agentPayoff - expectedPayoff) * 100) / 100,
+      });
+
+      // Back-fill belief update
+      const karmaDelta = isProposer
+        ? 0 // Will be computed by reputation system later if applicable
+        : 0;
+      const postBeliefs = isProposer
+        ? finalState.agentBeliefs.a
+        : finalState.agentBeliefs.b;
+      const preBeliefs = record.informationSet.beliefs;
+      const safeDelta =
+        postBeliefs.own[TrueState.SafeLow] -
+        preBeliefs.own[TrueState.SafeLow];
+      const oppSafeDelta =
+        postBeliefs.aboutOpponent[TrueState.SafeLow] -
+        preBeliefs.aboutOpponent[TrueState.SafeLow];
+      const updateMagnitude = Math.sqrt(
+        safeDelta * safeDelta + oppSafeDelta * oppSafeDelta
+      );
+
+      causalLog.backfillBeliefUpdate(record.decisionId, {
+        karmaDelta,
+        beliefDelta: {
+          own: {
+            [TrueState.SafeLow]: Math.round(safeDelta * 10000) / 10000,
+            [TrueState.DangerousLow]: Math.round(-safeDelta * 10000) / 10000,
+          },
+          aboutOpponent: {
+            [TrueState.SafeLow]: Math.round(oppSafeDelta * 10000) / 10000,
+            [TrueState.DangerousLow]: Math.round(-oppSafeDelta * 10000) / 10000,
+          },
+        },
+        updateMagnitude: Math.round(updateMagnitude * 10000) / 10000,
+      });
+    }
+
     const result: EpisodeResult = {
       episodeId,
       trueState: finalState.trueState,
@@ -161,6 +295,7 @@ export async function runEpisode(
       reviewAction: finalState.reviewAction,
       roundCount,
       converged,
+      decisionLog: causalLog,
     };
 
     return result;
@@ -248,6 +383,18 @@ export async function runABTest(
         try {
           const deltas = sharedReputationSystem.inspectAndUpdate(result);
           result.reputationDeltas = deltas;
+
+          // Back-fill karmaDelta on causal records
+          if (result.decisionLog) {
+            for (const record of result.decisionLog.getRecords()) {
+              if (record.beliefUpdate) {
+                const isProposer = record.action.type === 'propose';
+                record.beliefUpdate.karmaDelta = isProposer
+                  ? deltas.a
+                  : deltas.b;
+              }
+            }
+          }
         } finally {
           reputationMutex.release();
         }
@@ -401,6 +548,12 @@ export async function runABTest(
   baselineResults.forEach((ep) => {
     const file = path.join(baselineDir, `episode_${ep.episodeId}.json`);
     fs.writeFileSync(file, JSON.stringify(ep, null, 2));
+    // Save causal decision log as NDJSON
+    if (ep.decisionLog) {
+      ep.decisionLog.saveToFile(
+        path.join(baselineDir, `episode_${ep.episodeId}_decisions.ndjson`)
+      );
+    }
   });
 
   // Reputation variant folder
@@ -413,7 +566,23 @@ export async function runABTest(
   reputationResults.forEach((ep) => {
     const file = path.join(reputationDir, `episode_${ep.episodeId}.json`);
     fs.writeFileSync(file, JSON.stringify(ep, null, 2));
+    // Save causal decision log as NDJSON
+    if (ep.decisionLog) {
+      ep.decisionLog.saveToFile(
+        path.join(reputationDir, `episode_${ep.episodeId}_decisions.ndjson`)
+      );
+    }
   });
+
+  // Aggregated decisions directory
+  const decisionsDir = path.join(runDir, 'decisions');
+  fs.mkdirSync(decisionsDir, { recursive: true });
+  const allDecisionsFile = path.join(decisionsDir, 'all_decisions.ndjson');
+  for (const ep of [...baselineResults, ...reputationResults]) {
+    if (ep.decisionLog) {
+      ep.decisionLog.appendToFile(allDecisionsFile);
+    }
+  }
 
   console.log(`\nResults saved under ${runDir}`);
 
