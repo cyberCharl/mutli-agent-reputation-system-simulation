@@ -7,12 +7,20 @@ import {
   ReviewAction,
   NestedBelief,
   AgentId,
+  AgentRole,
   ModelRep,
   ReputationConsequences,
   LLMResponse,
   TrueState,
 } from './types';
 import { formatProposalPrompt, formatReviewPrompt } from './prompts';
+import {
+  AgentState,
+  AssociativeMemory,
+  MemoryNode,
+  createAgentState,
+  PersonaSeed,
+} from './persona';
 
 const LLMResponseSchema = z.object({
   action: z.string(),
@@ -334,5 +342,92 @@ export class Agent {
 
   public getModelId(): string {
     return this.reputation.id;
+  }
+}
+
+export interface PersonaInit {
+  id: number;
+  name: string;
+  role?: AgentRole | null;
+  innate?: string | null;
+  resourcesUnit?: number;
+  model?: LLMModel;
+}
+
+export class Persona {
+  public readonly state: AgentState;
+  public readonly memory: AssociativeMemory;
+  private readonly model: LLMModel;
+
+  constructor(init: PersonaInit | PersonaSeed, model?: LLMModel) {
+    const personaInit = init as PersonaInit;
+    const resourcesUnit = personaInit.resourcesUnit;
+    const modelFromInit = personaInit.model;
+    this.state = createAgentState({
+      id: init.id,
+      name: init.name,
+      role: init.role ?? null,
+      innate: init.innate ?? null,
+      resourcesUnit,
+    });
+    this.memory = new AssociativeMemory();
+    this.model =
+      model ?? modelFromInit ?? new LLMModel('mock', undefined, init.name);
+  }
+
+  async decide(
+    actionType: 'propose' | 'review',
+    belief: NestedBelief,
+    history: string[],
+    proposal?: ProtocolLevel,
+    opponentKarma?: number
+  ): Promise<ProtocolLevel | ReviewAction> {
+    if (actionType === 'propose') {
+      return this.model.decidePropose(
+        belief,
+        history,
+        undefined,
+        undefined,
+        opponentKarma
+      );
+    }
+
+    if (!proposal) {
+      throw new Error('Proposal required for review action');
+    }
+
+    return this.model.decideReview(
+      proposal,
+      belief,
+      history,
+      undefined,
+      opponentKarma
+    );
+  }
+
+  addMemory(node: Omit<MemoryNode, 'id'>): MemoryNode {
+    return this.memory.addMemory(node);
+  }
+
+  getRecentMemories(limit: number): MemoryNode[] {
+    return this.memory.getLatestNodes(limit);
+  }
+
+  setRole(role: AgentRole): void {
+    this.state.role = role;
+  }
+
+  addGrievance(grievance: string): void {
+    if (grievance.trim().length > 0) {
+      this.state.complainBuffer.push(grievance);
+    }
+  }
+
+  getModel(): LLMModel {
+    return this.model;
+  }
+
+  getId(): string {
+    return String(this.state.id);
   }
 }

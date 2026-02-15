@@ -184,3 +184,5 @@ export class ReputationSystem {
     }
   }
 }
+
+export * from './reputation/index';

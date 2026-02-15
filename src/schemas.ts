@@ -87,3 +87,63 @@ export interface JsonSchema {
   maximum?: number;
   items?: JsonSchema;
 }
+
+export const GossipEvaluationSchema = z.object({
+  credibilityLevel: z.enum([
+    'very_credible',
+    'credible',
+    'uncredible',
+    'very_uncredible',
+  ]),
+  shouldSpread: z.boolean(),
+  reasoning: z.string(),
+  reputationAdjustment: z.number().min(-1).max(1),
+});
+
+export const NetworkDecisionSchema = z.object({
+  shouldDisconnect: z.boolean(),
+  shouldConnect: z.boolean(),
+  reasoning: z.string(),
+  trustLevel: z.number().min(0).max(1),
+});
+
+export const InvestmentDecisionSchema = z.object({
+  accept: z.boolean(),
+  reasoning: z.string(),
+  amount: z.number().min(1).max(10).optional(),
+});
+
+export const ReturnDecisionSchema = z.object({
+  percentage: z.enum(['0', '25', '75', '100', '150']),
+  reasoning: z.string(),
+});
+
+export const PDDecisionSchema = z.object({
+  action: z.enum(['cooperate', 'defect']),
+  reasoning: z.string(),
+});
+
+export const SignUpDecisionSchema = z.object({
+  action: z.enum(['sign_up', 'wait']),
+  reasoning: z.string(),
+});
+
+export const ReputationUpdateSchema = z.object({
+  narrative: z.string(),
+  recordDelta: z.object({
+    investmentFailures: z.number(),
+    trusteeFailures: z.number(),
+    returnIssues: z.number(),
+    returnSuccesses: z.number(),
+    investorSuccesses: z.number(),
+  }),
+  reasoning: z.string(),
+});
+
+export type GossipEvaluation = z.infer<typeof GossipEvaluationSchema>;
+export type NetworkDecision = z.infer<typeof NetworkDecisionSchema>;
+export type InvestmentDecision = z.infer<typeof InvestmentDecisionSchema>;
+export type ReturnDecision = z.infer<typeof ReturnDecisionSchema>;
+export type PDDecision = z.infer<typeof PDDecisionSchema>;
+export type SignUpDecision = z.infer<typeof SignUpDecisionSchema>;
+export type ReputationUpdate = z.infer<typeof ReputationUpdateSchema>;

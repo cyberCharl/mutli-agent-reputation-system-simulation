@@ -72,8 +72,7 @@ export function formatProposalPrompt(
   if (karma !== undefined) {
     karmaContext = `\n\nYour current karma: ${karma}/100.`;
     if (karma < 30) {
-      karmaContext +=
-        ' WARNING: Low karma may result in blocked actions.';
+      karmaContext += ' WARNING: Low karma may result in blocked actions.';
     }
     if (opponentKarma !== undefined) {
       karmaContext += `\nOpponent karma: ${opponentKarma}/100.`;
@@ -102,8 +101,7 @@ export function formatReviewPrompt(
   if (karma !== undefined) {
     karmaContext = `\n\nYour current karma: ${karma}/100.`;
     if (karma < 30) {
-      karmaContext +=
-        ' WARNING: Low karma may result in blocked actions.';
+      karmaContext += ' WARNING: Low karma may result in blocked actions.';
     }
     if (opponentKarma !== undefined) {
       karmaContext += `\nOpponent karma: ${opponentKarma}/100.`;
@@ -116,4 +114,140 @@ export function formatReviewPrompt(
       .replace('{{opponentBelief}}', JSON.stringify(belief.aboutOpponent))
       .replace('{{history}}', historyStr) + karmaContext
   );
+}
+
+export interface NetworkDecisionPromptInput {
+  actorName: string;
+  actorRole?: string;
+  targetName: string;
+  currentConnections: string[];
+  blackList: string[];
+  context?: string;
+}
+
+export function buildNetworkDecisionPrompt(
+  input: NetworkDecisionPromptInput
+): string {
+  const connections =
+    input.currentConnections.length > 0
+      ? input.currentConnections.join(', ')
+      : 'None';
+  const blocked =
+    input.blackList.length > 0 ? input.blackList.join(', ') : 'None';
+  const roleLine = input.actorRole ? ` (${input.actorRole})` : '';
+  const contextLine = input.context ? `\nContext: ${input.context}` : '';
+
+  return [
+    `You are ${input.actorName}${roleLine} deciding social-network rewiring.`,
+    `Target agent: ${input.targetName}.`,
+    `Current connections: ${connections}.`,
+    `Blacklist (cannot connect): ${blocked}.`,
+    'Decide whether to connect and/or disconnect based on trust, utility, and risk.',
+    'Return strict JSON: {"shouldDisconnect": boolean, "shouldConnect": boolean, "reasoning": string, "trustLevel": number}.',
+    contextLine,
+  ]
+    .filter((line) => line.length > 0)
+    .join('\n');
+}
+
+export interface GossipEvaluationPromptInput {
+  listenerName: string;
+  gossiperName: string;
+  targetName: string;
+  gossipInfo: string;
+  sourceChain?: string[];
+  credibilityHint?: string;
+}
+
+export function buildGossipEvaluationPrompt(
+  input: GossipEvaluationPromptInput
+): string {
+  const chain =
+    input.sourceChain && input.sourceChain.length > 0
+      ? input.sourceChain.join(' -> ')
+      : input.gossiperName;
+  const hint = input.credibilityHint
+    ? `\nCredibility hint from prior hop: ${input.credibilityHint}.`
+    : '';
+
+  return [
+    `You are ${input.listenerName} evaluating gossip credibility.`,
+    `Gossiper: ${input.gossiperName}. Target: ${input.targetName}.`,
+    `Gossip content: ${input.gossipInfo}`,
+    `Source chain: ${chain}.`,
+    'Assess credibility and whether this gossip should spread further.',
+    'Return strict JSON: {"credibilityLevel":"very_credible|credible|uncredible|very_uncredible","shouldSpread":boolean,"reasoning":string,"reputationAdjustment":number}.',
+    hint,
+  ]
+    .filter((line) => line.length > 0)
+    .join('\n');
+}
+
+export function buildInvestmentAcceptPrompt(input: {
+  investorName: string;
+  trusteeName: string;
+  trustScore: number;
+  step: number;
+}): string {
+  return [
+    `You are ${input.investorName} deciding whether to invest with ${input.trusteeName}.`,
+    `Current trust score: ${input.trustScore.toFixed(3)}.`,
+    `Step: ${input.step}.`,
+    'Return strict JSON: {"accept": boolean, "reasoning": string}.',
+  ].join('\n');
+}
+
+export function buildInvestmentAmountPrompt(input: {
+  investorName: string;
+  trusteeName: string;
+  trustScore: number;
+  step: number;
+}): string {
+  return [
+    `You are ${input.investorName} choosing an investment amount for ${input.trusteeName}.`,
+    `Current trust score: ${input.trustScore.toFixed(3)}.`,
+    `Step: ${input.step}.`,
+    'Return strict JSON: {"amount": number, "reasoning": string} where amount is 1..10.',
+  ].join('\n');
+}
+
+export function buildReturnDecisionPrompt(input: {
+  trusteeName: string;
+  investorName: string;
+  amountReceived: number;
+  trustScore: number;
+  step: number;
+}): string {
+  return [
+    `You are ${input.trusteeName} deciding return percentage to ${input.investorName}.`,
+    `Amount received: ${input.amountReceived}. Trust score: ${input.trustScore.toFixed(3)}.`,
+    `Step: ${input.step}.`,
+    'Return strict JSON: {"percentage":"0|25|75|100|150", "reasoning": string}.',
+  ].join('\n');
+}
+
+export function buildPDDecisionPrompt(input: {
+  selfName: string;
+  opponentName: string;
+  trustScore: number;
+  step: number;
+}): string {
+  return [
+    `You are ${input.selfName} playing a one-shot prisoner's dilemma with ${input.opponentName}.`,
+    `Trust score: ${input.trustScore.toFixed(3)}. Step: ${input.step}.`,
+    'Return strict JSON: {"action":"cooperate|defect", "reasoning": string}.',
+  ].join('\n');
+}
+
+export function buildSignUpDecisionPrompt(input: {
+  selfName: string;
+  partnerName: string;
+  trustScore: number;
+  step: number;
+}): string {
+  return [
+    `You are ${input.selfName} deciding whether to sign up with ${input.partnerName}.`,
+    `Trust score: ${input.trustScore.toFixed(3)}. Step: ${input.step}.`,
+    'Return strict JSON: {"action":"sign_up|wait", "reasoning": string}.',
+  ].join('\n');
 }

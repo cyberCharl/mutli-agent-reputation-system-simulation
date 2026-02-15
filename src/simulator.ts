@@ -2,14 +2,36 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { config } from 'dotenv';
 import pLimit from 'p-limit';
+import seedrandom from 'seedrandom';
 import { MSPNGame } from './game';
-import { Agent, LLMModel } from './agent';
+import { Agent, LLMModel, Persona } from './agent';
 import { ReputationSystem } from './reputation';
+import { generatePersonaSeeds } from './persona';
+import { SocialNetwork } from './network';
 import {
+  GossipDatabase,
+  GossipEngine,
+  ReputationDatabase,
+  ReputationUpdater,
+} from './reputation';
+import {
+  InvestmentScenario,
+  MSPNNegotiationScenario,
+  PrisonerDilemmaScenario,
+  Scenario,
+  ScenarioContext,
+  ScenarioDecisionProvider,
+  SignUpScenario,
+} from './scenarios';
+import {
+  AgentRole,
+  CredibilityLevel,
   EpisodeResult,
   ABTestMetrics,
   ProtocolLevel,
   ReviewAction,
+  SimulationConfig,
+  ScenarioResult,
   TrueState,
   StatisticalSignificance,
 } from './types';
@@ -104,9 +126,7 @@ export async function runEpisode(
       );
 
       // Apply reputation consequences
-      const finalProposal = agentA.applyConsequences(
-        proposal
-      ) as ProtocolLevel;
+      const finalProposal = agentA.applyConsequences(proposal) as ProtocolLevel;
       game.setProposal(finalProposal);
 
       // Phase 2: Review
@@ -283,7 +303,9 @@ export async function runABTest(
       karmaMap.set(id, rep.karma);
     }
     karmaStorage.save(karmaMap);
-    console.log(`  Persisted karma for ${allReps.size} agents to ${karmaStorage.getPath()}`);
+    console.log(
+      `  Persisted karma for ${allReps.size} agents to ${karmaStorage.getPath()}`
+    );
   }
 
   // Calculate metrics
@@ -326,7 +348,12 @@ export async function runABTest(
     );
 
     const baseCI = bootstrapCI(allBasePayoffs, 0.95, 10000, seed);
-    const repCI = bootstrapCI(allRepPayoffs, 0.95, 10000, seed ? `${seed}-rep` : undefined);
+    const repCI = bootstrapCI(
+      allRepPayoffs,
+      0.95,
+      10000,
+      seed ? `${seed}-rep` : undefined
+    );
 
     significance = {
       payoffA: {
@@ -341,7 +368,11 @@ export async function runABTest(
         significant: tTestB.significant,
         meanDifference: tTestB.meanDifference,
       },
-      baselineCI: { mean: baseCI.mean, lower: baseCI.lower, upper: baseCI.upper },
+      baselineCI: {
+        mean: baseCI.mean,
+        lower: baseCI.lower,
+        upper: baseCI.upper,
+      },
       treatmentCI: { mean: repCI.mean, lower: repCI.lower, upper: repCI.upper },
     };
 
@@ -472,6 +503,292 @@ function logMetrics(metrics: ABTestMetrics): void {
   console.log(`  Avg Payoff A: ${metrics.avgPayoffA}`);
   console.log(`  Avg Payoff B: ${metrics.avgPayoffB}`);
   console.log(`  Total Episodes: ${metrics.totalEpisodes}`);
+}
+
+export interface MultiAgentStepResult {
+  step: number;
+  results: ScenarioResult[];
+}
+
+export interface MultiAgentSimulatorOptions {
+  apiKey?: string;
+  seed?: string;
+  decisionProvider?: ScenarioDecisionProvider;
+  modelFactory?: (seed: string, index: number) => LLMModel;
+}
+
+function defaultSimulationConfig(): SimulationConfig {
+  return {
+    maxRounds: 3,
+    beliefUpdateStrength: {
+      proposal: 0.2,
+      review: 0.15,
+    },
+    payoffNoise: 0,
+    initialBeliefAlignment: 0.5,
+    agentCount: 20,
+    scenario: 'mspn',
+    reputationBackend: 'repunet',
+    enableGossip: true,
+    gossipConfig: {
+      enabled: true,
+      maxSpreadDepth: 2,
+      credibilityDecay: 0.3,
+      recentWindow: 30,
+      listenerSelection: 'random',
+    },
+    enableNetwork: true,
+    networkConfig: {
+      enabled: true,
+      blackListMaxSize: 5,
+      observationInterval: 5,
+      initialConnectivity: 0.3,
+    },
+    storageConfig: {
+      basePath: './sim_storage',
+      runId: 'in-memory',
+      persistInterval: 1,
+    },
+    ablationMode: 'full',
+  };
+}
+
+export class MultiAgentSimulator {
+  private readonly config: SimulationConfig;
+  private readonly personas: Map<string, Persona> = new Map();
+  private readonly network: SocialNetwork;
+  private readonly reputationDb: ReputationDatabase;
+  private readonly reputationUpdater: ReputationUpdater;
+  private readonly gossipDb: GossipDatabase;
+  private readonly gossipEngine: GossipEngine | null;
+  private readonly rng: seedrandom.PRNG;
+  private readonly scenario: Scenario;
+
+  constructor(
+    configOverrides: Partial<SimulationConfig> = {},
+    private readonly options: MultiAgentSimulatorOptions = {}
+  ) {
+    this.config = {
+      ...defaultSimulationConfig(),
+      ...configOverrides,
+      gossipConfig: {
+        ...defaultSimulationConfig().gossipConfig,
+        ...(configOverrides.gossipConfig ?? {}),
+      },
+      networkConfig: {
+        ...defaultSimulationConfig().networkConfig,
+        ...(configOverrides.networkConfig ?? {}),
+      },
+      storageConfig: {
+        ...defaultSimulationConfig().storageConfig,
+        ...(configOverrides.storageConfig ?? {}),
+      },
+      beliefUpdateStrength: {
+        ...defaultSimulationConfig().beliefUpdateStrength,
+        ...(configOverrides.beliefUpdateStrength ?? {}),
+      },
+    };
+
+    this.rng = seedrandom(options.seed ?? 'multi-agent-default');
+    this.network = new SocialNetwork(this.config.networkConfig);
+    this.reputationDb = new ReputationDatabase();
+    this.reputationUpdater = new ReputationUpdater(this.reputationDb);
+    this.gossipDb = new GossipDatabase();
+    this.gossipEngine = this.config.enableGossip
+      ? new GossipEngine(
+          this.config.gossipConfig,
+          this.gossipDb,
+          this.reputationDb
+        )
+      : null;
+    this.scenario = this.createScenario(this.config.scenario);
+  }
+
+  async initialize(): Promise<void> {
+    const seed = this.options.seed ?? 'multi-agent-default';
+    const seeds = generatePersonaSeeds(
+      this.config.agentCount,
+      this.config.scenario
+    );
+
+    seeds.forEach((personaSeed, index) => {
+      const model = this.options.modelFactory
+        ? this.options.modelFactory(seed, index)
+        : new LLMModel(
+            this.options.apiKey,
+            undefined,
+            `${seed}-${personaSeed.name}`
+          );
+      const persona = new Persona(personaSeed, model);
+      this.personas.set(persona.state.name, persona);
+    });
+
+    this.initializeNetwork();
+  }
+
+  async runStep(step: number): Promise<MultiAgentStepResult> {
+    const context = this.makeContext(step);
+    const pairs = await this.scenario.pair(
+      Array.from(this.personas.values()),
+      this.network,
+      this.config,
+      step
+    );
+
+    const results: ScenarioResult[] = [];
+    for (const pair of pairs) {
+      const result = await this.scenario.execute(pair, context);
+      results.push(result);
+      await this.scenario.updateReputation(pair, result, context);
+      this.captureMemory(pair, result, step);
+
+      if (this.gossipEngine && this.scenario.shouldTriggerGossip(result)) {
+        await this.maybeRunGossip(pair, result, step);
+      }
+    }
+
+    return { step, results };
+  }
+
+  async runSteps(stepCount: number): Promise<MultiAgentStepResult[]> {
+    const total = Math.max(0, Math.floor(stepCount));
+    const outputs: MultiAgentStepResult[] = [];
+    for (let step = 1; step <= total; step += 1) {
+      outputs.push(await this.runStep(step));
+    }
+    return outputs;
+  }
+
+  getConfig(): SimulationConfig {
+    return { ...this.config };
+  }
+
+  getPersonaCount(): number {
+    return this.personas.size;
+  }
+
+  getScenarioName(): string {
+    return this.scenario.name;
+  }
+
+  getReputationDb(): ReputationDatabase {
+    return this.reputationDb;
+  }
+
+  private createScenario(name: SimulationConfig['scenario']): Scenario {
+    if (name === 'investment') {
+      return new InvestmentScenario();
+    }
+    if (name === 'pd_game') {
+      return new PrisonerDilemmaScenario();
+    }
+    if (name === 'sign_up') {
+      return new SignUpScenario();
+    }
+    return new MSPNNegotiationScenario();
+  }
+
+  private initializeNetwork(): void {
+    const personas = Array.from(this.personas.values());
+    for (const source of personas) {
+      for (const target of personas) {
+        if (source === target) {
+          continue;
+        }
+        if (this.rng() <= this.config.networkConfig.initialConnectivity) {
+          this.network.addEdge(
+            source.state.name,
+            target.state.name,
+            this.defaultRole(source.state.role),
+            0
+          );
+        }
+      }
+    }
+  }
+
+  private makeContext(step: number): ScenarioContext {
+    return {
+      step,
+      network: this.network,
+      reputationDb: this.reputationDb,
+      reputationUpdater: this.reputationUpdater,
+      gossipEngine: this.gossipEngine,
+      config: this.config,
+      decisionProvider: this.options.decisionProvider,
+      rng: this.rng,
+    };
+  }
+
+  private async maybeRunGossip(
+    pair: [Persona, Persona],
+    result: ScenarioResult,
+    step: number
+  ): Promise<void> {
+    if (!this.gossipEngine) {
+      return;
+    }
+    const [source, target] = pair;
+    const sourcePayoff = result.payoffs[source.state.name] ?? 0;
+    if (sourcePayoff >= 0) {
+      return;
+    }
+
+    const grievance = `${target.state.name} caused payoff ${sourcePayoff} for ${source.state.name}`;
+    const agents = Array.from(this.personas.values());
+    await this.gossipEngine.firstOrderGossip({
+      gossiper: {
+        id: source.getId(),
+        name: source.state.name,
+        role: this.defaultRole(source.state.role),
+      },
+      target: {
+        id: target.getId(),
+        name: target.state.name,
+        role: this.defaultRole(target.state.role),
+      },
+      grievance,
+      candidateListeners: agents.map((persona) => ({
+        id: persona.getId(),
+        name: persona.state.name,
+        role: this.defaultRole(persona.state.role),
+      })),
+      step,
+    });
+  }
+
+  private captureMemory(
+    pair: [Persona, Persona],
+    result: ScenarioResult,
+    step: number
+  ): void {
+    const [a, b] = pair;
+    const description = `${this.scenario.name} => ${a.state.name}:${result.payoffs[a.state.name] ?? 0}, ${b.state.name}:${result.payoffs[b.state.name] ?? 0}`;
+
+    a.addMemory({
+      type: 'event',
+      subject: a.state.name,
+      predicate: this.scenario.name,
+      object: b.state.name,
+      description,
+      createdAt: step,
+      metadata: { result },
+    });
+
+    b.addMemory({
+      type: 'event',
+      subject: b.state.name,
+      predicate: this.scenario.name,
+      object: a.state.name,
+      description,
+      createdAt: step,
+      metadata: { result },
+    });
+  }
+
+  private defaultRole(role: AgentRole | null): AgentRole {
+    return role ?? 'player';
+  }
 }
 
 // Main execution
