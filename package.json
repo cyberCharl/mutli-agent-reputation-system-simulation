@@ -6,9 +6,12 @@
   "scripts": {
     "dev": "ts-node src/simulator.ts",
     "test": "jest",
+    "test:unit": "jest",
     "test:openrouter": "jest tests/openrouter.test.ts",
     "build": "tsc",
+    "check-types": "tsc --noEmit",
     "compare": "ts-node src/cli.ts",
+    "trace:actions": "ts-node src/telemetry/analyze.ts",
     "visualize": "ts-node src/visualize.ts",
     "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\"",
     "lint": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\""

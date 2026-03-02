@@ -12,6 +12,7 @@ import {
   LLMResponse,
   TrueState,
 } from './types';
+import type { EpisodeTraceRecorder } from './telemetry/logger';
 import { formatProposalPrompt, formatReviewPrompt } from './prompts';
 
 const LLMResponseSchema = z.object({
@@ -22,6 +23,27 @@ const LLMResponseSchema = z.object({
 const RATE_LIMIT_MS = parseInt(process.env.RATE_LIMIT_MS || '200', 10);
 const apiLimiter = pLimit(1); // Serialize API calls
 let lastApiCallTime = 0;
+
+type DecisionSource = 'mock' | 'llm' | 'fallback';
+
+interface ModelDecision<T extends ProtocolLevel | ReviewAction> {
+  action: T;
+  outputText: string;
+  source: DecisionSource;
+  error?: string;
+}
+
+export interface AgentDecision<T extends ProtocolLevel | ReviewAction> {
+  action: T;
+  turnId?: string;
+  promptEventId?: string;
+  actedEventId?: string;
+}
+
+interface AgentTraceContext {
+  recorder: EpisodeTraceRecorder;
+  round: number;
+}
 
 async function rateLimitedApiCall<T>(fn: () => Promise<T>): Promise<T> {
   return apiLimiter(async () => {
@@ -70,22 +92,16 @@ export class LLMModel {
 
   public async decidePropose(
     belief: NestedBelief,
-    history: string[],
-    reputationWarning?: string,
-    karma?: number,
-    opponentKarma?: number
-  ): Promise<ProtocolLevel> {
+    prompt: string
+  ): Promise<ModelDecision<ProtocolLevel>> {
     if (this.isMockMode) {
-      return this.mockPropose(belief);
+      const action = this.mockPropose(belief);
+      return {
+        action,
+        outputText: JSON.stringify({ action }),
+        source: 'mock',
+      };
     }
-
-    const prompt = formatProposalPrompt(
-      belief,
-      history,
-      reputationWarning,
-      karma,
-      opponentKarma
-    );
 
     try {
       const response = await rateLimitedApiCall(() =>
@@ -113,34 +129,39 @@ export class LLMModel {
       const action = parsed.action.toLowerCase();
 
       if (Object.values(ProtocolLevel).includes(action as ProtocolLevel)) {
-        return action as ProtocolLevel;
+        return {
+          action: action as ProtocolLevel,
+          outputText: content,
+          source: 'llm',
+        };
       } else {
         throw new Error(`Invalid proposal action: ${action}`);
       }
     } catch (error) {
       console.warn(`LLM proposal failed, using mock: ${error}`);
-      return this.mockPropose(belief);
+      const action = this.mockPropose(belief);
+      return {
+        action,
+        outputText: JSON.stringify({ action }),
+        source: 'fallback',
+        error: error instanceof Error ? error.message : String(error),
+      };
     }
   }
 
   public async decideReview(
     proposal: ProtocolLevel,
     belief: NestedBelief,
-    history: string[],
-    karma?: number,
-    opponentKarma?: number
-  ): Promise<ReviewAction> {
+    prompt: string
+  ): Promise<ModelDecision<ReviewAction>> {
     if (this.isMockMode) {
-      return this.mockReview(proposal, belief);
+      const action = this.mockReview(proposal, belief);
+      return {
+        action,
+        outputText: JSON.stringify({ action }),
+        source: 'mock',
+      };
     }
-
-    const prompt = formatReviewPrompt(
-      proposal,
-      belief,
-      history,
-      karma,
-      opponentKarma
-    );
 
     try {
       const response = await rateLimitedApiCall(() =>
@@ -168,14 +189,28 @@ export class LLMModel {
       const action = parsed.action.toLowerCase();
 
       if (Object.values(ReviewAction).includes(action as ReviewAction)) {
-        return action as ReviewAction;
+        return {
+          action: action as ReviewAction,
+          outputText: content,
+          source: 'llm',
+        };
       } else {
         throw new Error(`Invalid review action: ${action}`);
       }
     } catch (error) {
       console.warn(`LLM review failed, using mock: ${error}`);
-      return this.mockReview(proposal, belief);
+      const action = this.mockReview(proposal, belief);
+      return {
+        action,
+        outputText: JSON.stringify({ action }),
+        source: 'fallback',
+        error: error instanceof Error ? error.message : String(error),
+      };
     }
+  }
+
+  public getModelId(): string {
+    return this.modelId;
   }
 
   private mockPropose(belief: NestedBelief): ProtocolLevel {
@@ -235,28 +270,117 @@ export class Agent {
     belief: NestedBelief,
     history: string[],
     proposal?: ProtocolLevel,
-    opponentKarma?: number
-  ): Promise<ProtocolLevel | ReviewAction> {
+    opponentKarma?: number,
+    traceContext?: AgentTraceContext
+  ): Promise<AgentDecision<ProtocolLevel | ReviewAction>> {
+    const turnId = traceContext?.recorder.buildTurnId(
+      traceContext.round,
+      actionType,
+      this.id
+    );
+
     if (actionType === 'propose') {
       const reputationWarning = this.getReputationWarning();
-      return await this.model.decidePropose(
+      const prompt = formatProposalPrompt(
         belief,
         history,
         reputationWarning,
         this.reputation.karma,
         opponentKarma
       );
+      const promptEvent = traceContext?.recorder.emit({
+        eventType: 'agent_prompted',
+        turnId,
+        agentId: this.id,
+        payload: {
+          round: traceContext.round,
+          actionType,
+          modelId: this.model.getModelId(),
+          prompt,
+          history,
+          belief,
+          karma: this.reputation.karma,
+          opponentKarma,
+          reputationWarning,
+        },
+      });
+      const decision = await this.model.decidePropose(belief, prompt);
+      const actedEvent = traceContext?.recorder.emit({
+        eventType: 'agent_acted',
+        turnId,
+        agentId: this.id,
+        parentSpanId: promptEvent?.eventId,
+        causeEventIds: promptEvent ? [promptEvent.eventId] : undefined,
+        payload: {
+          round: traceContext.round,
+          actionType,
+          modelId: this.model.getModelId(),
+          promptEventId: promptEvent?.eventId,
+          chosenAction: decision.action,
+          outputText: decision.outputText,
+          source: decision.source,
+          error: decision.error,
+        },
+      });
+
+      return {
+        action: decision.action,
+        turnId,
+        promptEventId: promptEvent?.eventId,
+        actedEventId: actedEvent?.eventId,
+      };
     } else {
       if (!proposal) {
         throw new Error('Proposal required for review action');
       }
-      return await this.model.decideReview(
+      const prompt = formatReviewPrompt(
         proposal,
         belief,
         history,
         this.reputation.karma,
         opponentKarma
       );
+      const promptEvent = traceContext?.recorder.emit({
+        eventType: 'agent_prompted',
+        turnId,
+        agentId: this.id,
+        payload: {
+          round: traceContext.round,
+          actionType,
+          modelId: this.model.getModelId(),
+          prompt,
+          history,
+          belief,
+          karma: this.reputation.karma,
+          opponentKarma,
+          proposal,
+        },
+      });
+      const decision = await this.model.decideReview(proposal, belief, prompt);
+      const actedEvent = traceContext?.recorder.emit({
+        eventType: 'agent_acted',
+        turnId,
+        agentId: this.id,
+        parentSpanId: promptEvent?.eventId,
+        causeEventIds: promptEvent ? [promptEvent.eventId] : undefined,
+        payload: {
+          round: traceContext.round,
+          actionType,
+          modelId: this.model.getModelId(),
+          promptEventId: promptEvent?.eventId,
+          chosenAction: decision.action,
+          outputText: decision.outputText,
+          source: decision.source,
+          error: decision.error,
+        },
+      });
+
+      return {
+        action: decision.action,
+        turnId,
+        promptEventId: promptEvent?.eventId,
+        actedEventId: actedEvent?.eventId,
+      };
     }
   }
 
@@ -307,9 +431,23 @@ export class Agent {
   public applyConsequences(
     action: ProtocolLevel | ReviewAction
   ): ProtocolLevel | ReviewAction {
+    return this.constrainAction(action).action;
+  }
+
+  public constrainAction(
+    action: ProtocolLevel | ReviewAction
+  ): {
+    action: ProtocolLevel | ReviewAction;
+    wasConstrained: boolean;
+    reason: 'none' | 'blocked_action' | 'auto_reject';
+  } {
     // Apply blocked actions
     if (this.consequences.blockedActions.includes(action as ProtocolLevel)) {
-      return ProtocolLevel.Medium; // Force medium if low is blocked
+      return {
+        action: ProtocolLevel.Medium,
+        wasConstrained: true,
+        reason: 'blocked_action',
+      };
     }
 
     // Apply auto-reject for very low karma
@@ -318,10 +456,18 @@ export class Agent {
       this.id === 'B' &&
       action === ReviewAction.Accept
     ) {
-      return ReviewAction.Reject;
+      return {
+        action: ReviewAction.Reject,
+        wasConstrained: true,
+        reason: 'auto_reject',
+      };
     }
 
-    return action;
+    return {
+      action,
+      wasConstrained: false,
+      reason: 'none',
+    };
   }
 
   public applyPayoffPenalty(payoff: number): number {

@@ -1,5 +1,6 @@
 import seedrandom from 'seedrandom';
 import {
+  AgentId,
   GameState,
   Phase,
   ProtocolLevel,
@@ -8,6 +9,13 @@ import {
   NestedBelief,
   GameConfig,
 } from './types';
+import type { EpisodeTraceRecorder } from './telemetry/logger';
+
+interface BeliefTraceContext {
+  recorder: EpisodeTraceRecorder;
+  round: number;
+  causeEventId?: string;
+}
 
 export class MSPNGame {
   private state: GameState;
@@ -77,7 +85,10 @@ export class MSPNGame {
     return { ...this.state };
   }
 
-  public setProposal(proposal: ProtocolLevel): void {
+  public setProposal(
+    proposal: ProtocolLevel,
+    traceContext?: BeliefTraceContext
+  ): void {
     if (this.state.phase !== Phase.Proposal) {
       throw new Error(`Cannot set proposal in phase ${this.state.phase}`);
     }
@@ -90,12 +101,21 @@ export class MSPNGame {
     };
 
     // Update beliefs based on proposal
-    this.updateBeliefs('A', proposal, 'proposal');
+    this.updateBeliefs('A', proposal, 'proposal', traceContext);
     // Observer (B) updates beliefs from watching A's action
-    this.updateBeliefsFromObservation('B', proposal, 'proposal');
+    this.updateBeliefsFromObservation(
+      'B',
+      'A',
+      proposal,
+      'proposal',
+      traceContext
+    );
   }
 
-  public setReview(reviewAction: ReviewAction): void {
+  public setReview(
+    reviewAction: ReviewAction,
+    traceContext?: BeliefTraceContext
+  ): void {
     if (this.state.phase !== Phase.Review) {
       throw new Error(`Cannot set review in phase ${this.state.phase}`);
     }
@@ -108,9 +128,15 @@ export class MSPNGame {
     };
 
     // Update beliefs based on review
-    this.updateBeliefs('B', reviewAction, 'review');
+    this.updateBeliefs('B', reviewAction, 'review', traceContext);
     // Observer (A) updates beliefs from watching B's action
-    this.updateBeliefsFromObservation('A', reviewAction, 'review');
+    this.updateBeliefsFromObservation(
+      'A',
+      'B',
+      reviewAction,
+      'review',
+      traceContext
+    );
   }
 
   public resolveExecution(): GameState {
@@ -194,16 +220,21 @@ export class MSPNGame {
   private updateBeliefs(
     agentId: 'A' | 'B',
     action: ProtocolLevel | ReviewAction,
-    type: 'proposal' | 'review'
+    type: 'proposal' | 'review',
+    traceContext?: BeliefTraceContext
   ): void {
     const strength =
       type === 'proposal'
         ? this.config.beliefUpdateStrength.proposal
         : this.config.beliefUpdateStrength.review;
 
-    const agentBelief =
-      this.state.agentBeliefs[agentId.toLowerCase() as 'a' | 'b'];
-    const updatedBelief = { ...agentBelief };
+    const agentKey = agentId.toLowerCase() as 'a' | 'b';
+    const agentBelief = this.state.agentBeliefs[agentKey];
+    const beforeOwn = { ...agentBelief.own };
+    const updatedBelief = {
+      own: { ...agentBelief.own },
+      aboutOpponent: { ...agentBelief.aboutOpponent },
+    };
 
     // Update own belief based on action
     if (type === 'proposal') {
@@ -239,9 +270,28 @@ export class MSPNGame {
       ...this.state,
       agentBeliefs: {
         ...this.state.agentBeliefs,
-        [agentId.toLowerCase()]: updatedBelief,
+        [agentKey]: updatedBelief,
       },
     };
+
+    traceContext?.recorder.emit({
+      eventType: 'belief_updated',
+      agentId,
+      causeEventIds: traceContext.causeEventId
+        ? [traceContext.causeEventId]
+        : undefined,
+      payload: {
+        round: traceContext.round,
+        phase: type,
+        updateKind: 'self',
+        sourceAgentId: agentId,
+        subjectAgentId: agentId,
+        targetField: 'own',
+        basisAction: action,
+        before: beforeOwn,
+        after: { ...updatedBelief.own },
+      },
+    });
   }
 
   /**
@@ -251,8 +301,10 @@ export class MSPNGame {
    */
   public updateBeliefsFromObservation(
     observerId: 'A' | 'B',
+    sourceAgentId: AgentId,
     observedAction: ProtocolLevel | ReviewAction,
-    type: 'proposal' | 'review'
+    type: 'proposal' | 'review',
+    traceContext?: BeliefTraceContext
   ): void {
     const strength =
       type === 'proposal'
@@ -299,6 +351,25 @@ export class MSPNGame {
         [observerKey]: updatedBelief,
       },
     };
+
+    traceContext?.recorder.emit({
+      eventType: 'belief_updated',
+      agentId: observerId,
+      causeEventIds: traceContext.causeEventId
+        ? [traceContext.causeEventId]
+        : undefined,
+      payload: {
+        round: traceContext.round,
+        phase: type,
+        updateKind: 'observation',
+        sourceAgentId,
+        subjectAgentId: observerId,
+        targetField: 'aboutOpponent',
+        basisAction: observedAction,
+        before: { ...observerBelief.aboutOpponent },
+        after: { ...updatedBelief.aboutOpponent },
+      },
+    });
   }
 
   private normalizeBelief(belief: Record<TrueState, number>): void {
