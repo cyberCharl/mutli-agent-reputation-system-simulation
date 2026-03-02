@@ -1,4 +1,20 @@
 import seedrandom from 'seedrandom';
+export {
+  computeAchievedPower,
+  computeRequiredSampleSize,
+  summarizePowerAnalysis,
+} from './analysis/power';
+export {
+  cohensD,
+  cliffsDelta,
+  glassDelta,
+  interpretCliffsDelta,
+  interpretEffectSize,
+} from './analysis/effects';
+export {
+  correctPValues,
+  familyWiseErrorRate,
+} from './analysis/correction';
 
 export interface TTestResult {
   tStatistic: number;
