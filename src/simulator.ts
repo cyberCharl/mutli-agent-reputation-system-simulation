@@ -105,7 +105,7 @@ export async function runEpisode(
 
       // Apply reputation consequences
       const finalProposal = agentA.applyConsequences(
-        proposal
+        proposal.action
       ) as ProtocolLevel;
       game.setProposal(finalProposal);
 
@@ -125,7 +125,7 @@ export async function runEpisode(
 
       // Apply reputation consequences
       const finalReviewAction = agentB.applyConsequences(
-        reviewAction
+        reviewAction.action
       ) as ReviewAction;
       game.setReview(finalReviewAction);
 
